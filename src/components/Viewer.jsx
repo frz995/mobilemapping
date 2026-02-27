@@ -79,13 +79,23 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
 
     const init = async () => {
       let config;
+      
+      // DOUBLE-CHECK: Ensure we have a valid URL for cloud images
+      let finalImage = image;
+      if (finalImage && !configUrl && !finalImage.startsWith('http')) {
+         console.warn('Viewer: Received relative path, forcing CDN URL fallback', finalImage);
+         const cdnBase = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+         finalImage = `${cdnBase}${finalImage.replace(/^\/+/, '')}`;
+         console.log('Viewer: Fixed URL to', finalImage);
+      }
+
       if (configUrl) {
         const res = await fetch(configUrl);
         config = await res.json();
       } else {
         config = {
           type: 'equirectangular',
-          panorama: image,
+          panorama: finalImage,
           autoLoad: true,
           autoRotate: 0,
           crossOrigin: 'anonymous', // Enable CORS for cloud-stored images
