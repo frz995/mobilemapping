@@ -39,9 +39,14 @@ export async function fetchCsv(url) {
     
     if (!image_url && filename) {
       // FORCE the use of the resolved base URL for GitHub Pages
-      // The issue is likely that "resolvedBase" was empty or incorrect during build
-      // So we will use the hardcoded CDN URL if resolvedBase is empty
-      let cdnUrl = resolvedBase || 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+      // We will check specifically if resolvedBase is a relative path or empty, and override it
+      let cdnUrl = resolvedBase;
+      
+      // If it's empty or seems to be a relative path (doesn't start with http), use the CDN
+      if (!cdnUrl || (!cdnUrl.startsWith('http') && !cdnUrl.startsWith('//'))) {
+         cdnUrl = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+      }
+      
       // Ensure cdnUrl doesn't end with slash before appending filename
       cdnUrl = cdnUrl.replace(/\/$/, '');
       image_url = `${cdnUrl}/${filename}`;
