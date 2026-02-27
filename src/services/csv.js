@@ -34,17 +34,21 @@ export async function fetchCsv(url) {
     const filename = pick(row, ['filename']);
     let image_url = pick(row, ['image_url']);
     
-    // Explicitly check for VITE_IMAGE_BASE_URL override, then fallback
-    const resolvedBase = baseImage || '';
-    
-    if (!image_url && filename) {
-      // DEBUG: Hardcoded CDN URL to ensure it works
-      // This bypasses any environment variable issues
-      const cdnBase = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
-      image_url = `${cdnBase}${filename}`;
-      
-      // Log for debugging
-      if (idx === 0) console.log('Generated Image URL (Example):', image_url);
+    // DEBUG: Hardcoded CDN URL to ensure it works
+    // If image_url is missing OR if it is relative (doesn't start with http/https)
+    // we force it to use the CDN URL.
+    if (!image_url || (typeof image_url === 'string' && !image_url.startsWith('http'))) {
+      const targetFile = image_url || filename;
+      if (targetFile) {
+        const cdnBase = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+        // Remove any leading slash from targetFile to avoid double slashes if needed, 
+        // though usually filenames don't have it.
+        const cleanFilename = targetFile.replace(/^\/+/, '');
+        image_url = `${cdnBase}${cleanFilename}`;
+        
+        // Log for debugging
+        if (idx === 0) console.log('Fixed Image URL (Example):', image_url);
+      }
     }
     const config_url = pick(row, ['config_url']);
     const date = pick(row, ['captured_at', 'date']);
