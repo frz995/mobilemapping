@@ -41,8 +41,10 @@ export async function fetchCsv(url) {
       // FORCE the use of the resolved base URL for GitHub Pages
       // The issue is likely that "resolvedBase" was empty or incorrect during build
       // So we will use the hardcoded CDN URL if resolvedBase is empty
-      const cdnUrl = resolvedBase || 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
-      image_url = `${cdnUrl.replace(/\/$/, '')}/${filename}`;
+      let cdnUrl = resolvedBase || 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+      // Ensure cdnUrl doesn't end with slash before appending filename
+      cdnUrl = cdnUrl.replace(/\/$/, '');
+      image_url = `${cdnUrl}/${filename}`;
     }
     const config_url = pick(row, ['config_url']);
     const date = pick(row, ['captured_at', 'date']);
