@@ -33,8 +33,13 @@ export async function fetchCsv(url) {
     const id = idRaw !== undefined ? parseInt(idRaw) : idx + 1;
     const filename = pick(row, ['filename']);
     let image_url = pick(row, ['image_url']);
+    
+    // Explicitly check for VITE_IMAGE_BASE_URL override, then fallback
+    const resolvedBase = baseImage || '';
+    
     if (!image_url && filename) {
-      image_url = baseImage ? `${baseImage.replace(/\/$/, '')}/${filename}` : filename;
+      // If resolvedBase is present, use it. Otherwise, assume local relative path (which might fail if files are missing)
+      image_url = resolvedBase ? `${resolvedBase.replace(/\/$/, '')}/${filename}` : filename;
     }
     const config_url = pick(row, ['config_url']);
     const date = pick(row, ['captured_at', 'date']);
