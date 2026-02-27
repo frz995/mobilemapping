@@ -38,18 +38,13 @@ export async function fetchCsv(url) {
     const resolvedBase = baseImage || '';
     
     if (!image_url && filename) {
-      // FORCE the use of the resolved base URL for GitHub Pages
-      // We will check specifically if resolvedBase is a relative path or empty, and override it
-      let cdnUrl = resolvedBase;
+      // DEBUG: Hardcoded CDN URL to ensure it works
+      // This bypasses any environment variable issues
+      const cdnBase = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+      image_url = `${cdnBase}${filename}`;
       
-      // If it's empty or seems to be a relative path (doesn't start with http), use the CDN
-      if (!cdnUrl || (!cdnUrl.startsWith('http') && !cdnUrl.startsWith('//'))) {
-         cdnUrl = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
-      }
-      
-      // Ensure cdnUrl doesn't end with slash before appending filename
-      cdnUrl = cdnUrl.replace(/\/$/, '');
-      image_url = `${cdnUrl}/${filename}`;
+      // Log for debugging
+      if (idx === 0) console.log('Generated Image URL (Example):', image_url);
     }
     const config_url = pick(row, ['config_url']);
     const date = pick(row, ['captured_at', 'date']);
