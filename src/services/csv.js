@@ -38,8 +38,11 @@ export async function fetchCsv(url) {
     const resolvedBase = baseImage || '';
     
     if (!image_url && filename) {
-      // If resolvedBase is present, use it. Otherwise, assume local relative path (which might fail if files are missing)
-      image_url = resolvedBase ? `${resolvedBase.replace(/\/$/, '')}/${filename}` : filename;
+      // FORCE the use of the resolved base URL for GitHub Pages
+      // The issue is likely that "resolvedBase" was empty or incorrect during build
+      // So we will use the hardcoded CDN URL if resolvedBase is empty
+      const cdnUrl = resolvedBase || 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+      image_url = `${cdnUrl.replace(/\/$/, '')}/${filename}`;
     }
     const config_url = pick(row, ['config_url']);
     const date = pick(row, ['captured_at', 'date']);
