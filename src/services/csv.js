@@ -19,7 +19,11 @@ export async function fetchCsv(url) {
   const res = await fetch(url);
   const text = await res.text();
   const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-  const baseImage = import.meta.env.VITE_IMAGE_BASE_URL || '';
+  // Use environment variable or fallback to the known GitHub CDN URL
+  const baseImage = import.meta.env.VITE_IMAGE_BASE_URL || 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
+  
+  console.log('CSV Service: Base Image URL:', baseImage);
+
   return parsed.data.map((row, idx) => {
     const lat = toNumber(pick(row, ['lat', 'latitude']));
     const lon = toNumber(pick(row, ['lon', 'longitude']));
