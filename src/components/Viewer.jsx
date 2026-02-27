@@ -75,6 +75,8 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
       }
     }
 
+    console.log('Viewer: Loading Image URL:', image); // Debug log
+
     const init = async () => {
       let config;
       if (configUrl) {
