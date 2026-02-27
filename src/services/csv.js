@@ -34,12 +34,6 @@ export async function fetchCsv(url) {
     const filename = pick(row, ['filename']);
     let image_url = pick(row, ['image_url']);
     
-    // DEBUG: Log first row to see what's happening
-    if (idx === 0) {
-      console.log('CSV DEBUG: Row 0', { filename, image_url_initial: image_url });
-    }
-
-    // DEBUG: Hardcoded CDN URL to ensure it works
     // If image_url is missing OR if it is relative (doesn't start with http/https)
     // we force it to use the CDN URL.
     if (!image_url || (typeof image_url === 'string' && !image_url.startsWith('http'))) {
@@ -48,9 +42,6 @@ export async function fetchCsv(url) {
         const cdnBase = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
         const cleanFilename = targetFile.replace(/^\/+/, '');
         image_url = `${cdnBase}${cleanFilename}`;
-        
-        // Log for debugging
-        if (idx === 0) console.log('CSV DEBUG: Fixed Image URL:', image_url);
       }
     }
     const config_url = pick(row, ['config_url']);

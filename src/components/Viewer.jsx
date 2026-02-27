@@ -75,8 +75,6 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
       }
     }
 
-    console.log('Viewer: Loading Image URL:', image); // Debug log
-
     const init = async () => {
       let config;
       
@@ -86,7 +84,6 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
          console.warn('Viewer: Received relative path, forcing CDN URL fallback', finalImage);
          const cdnBase = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
          finalImage = `${cdnBase}${finalImage.replace(/^\/+/, '')}`;
-         console.log('Viewer: Fixed URL to', finalImage);
       }
 
       if (configUrl) {
