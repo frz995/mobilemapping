@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table } from 'lucide-react';
+import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
 import { BASEMAPS } from '../config/basemaps';
 
@@ -10,13 +10,14 @@ const MenuLink = ({ icon: Icon, label, active }) => (
   </button>
 );
 
-const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen }) => {
+const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, isViewerOpen, setIsViewerOpen }) => {
   const layers = [
     { name: 'panotrack', title: 'Panotrack (360 Views)' }
   ];
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isBasemapOpen, setIsBasemapOpen] = useState(false);
+  const [isToolboxOpen, setIsToolboxOpen] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(null);
 
   const toggleLayer = (layerName) => {
@@ -51,8 +52,26 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
           </div>
         </div>
 
-        {/* GIS Toolbar - Next to Title Card */}
-        <div className="bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center p-1 gap-1 h-10 transition-all duration-300">
+        {/* Toolbox - Next to Title Card */}
+        <div className="flex items-center">
+            <div className={clsx(
+                "bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)]",
+                isToolboxOpen ? "pr-1" : "" 
+            )}>
+                <button 
+                    onClick={() => setIsToolboxOpen(!isToolboxOpen)}
+                    className="flex items-center gap-2 px-3 h-10 text-gray-700 hover:text-blue-600 transition-colors"
+                >
+                    <Wrench size={18} />
+                    <span className="text-xs font-bold text-gray-700">Toolbox</span>
+                    <ChevronRight size={16} className={clsx("transition-transform duration-300", isToolboxOpen ? "rotate-180" : "")} />
+                </button>
+
+                <div className={clsx(
+                    "flex items-center gap-1 transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)] overflow-hidden",
+                    isToolboxOpen ? "max-w-[600px] opacity-100" : "max-w-0 opacity-0"
+                )}>
+                    <div className="w-px h-5 bg-gray-300 mx-1 flex-shrink-0"></div>
           <button
             onClick={() => setActiveTool(activeTool === 'measure' ? null : 'measure')}
             className={clsx(
@@ -162,9 +181,24 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
           </button>
         </div>
       </div>
+    </div>
+      </div>
 
-      {/* Top Right: Basemap Switcher */}
-      <div className="absolute top-4 right-4 pointer-events-auto z-[2000]">
+      {/* Top Right: Basemap Switcher & Viewer Toggle */}
+      <div className="absolute top-4 right-4 pointer-events-auto z-[2000] flex items-center gap-2">
+        
+        {/* Viewer Toggle Button */}
+        <button 
+          onClick={() => setIsViewerOpen(!isViewerOpen)}
+          className={clsx(
+            "bg-white/70 backdrop-blur-md p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-10 w-10 flex items-center justify-center",
+            !isViewerOpen && "bg-blue-50 text-blue-600 border-blue-200"
+          )}
+          title={isViewerOpen ? "Hide 360° Viewer" : "Show 360° Viewer"}
+        >
+          {isViewerOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
+        </button>
+
         <div className="relative">
           <button 
             onClick={() => setIsBasemapOpen(!isBasemapOpen)}

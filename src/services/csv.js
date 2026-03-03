@@ -15,8 +15,8 @@ function toNumber(v, d = undefined) {
   return Number.isFinite(n) ? n : d;
 }
 
-export async function fetchCsv(url) {
-  const res = await fetch(url);
+export async function fetchCsv(url, signal) {
+  const res = await fetch(url, { signal });
   const text = await res.text();
   const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
   // Use environment variable or fallback to the known GitHub CDN URL
@@ -35,16 +35,34 @@ export async function fetchCsv(url) {
     let image_url = pick(row, ['image_url']);
     
     // If image_url is missing OR if it is relative (doesn't start with http/https)
-    // we force it to use the CDN URL.
+    // we use the base URL from env or fallback
     if (!image_url || (typeof image_url === 'string' && !image_url.startsWith('http'))) {
       const targetFile = image_url || filename;
       if (targetFile) {
-        const cdnBase = 'https://cdn.jsdelivr.net/gh/frz995/mobilemapping@main/MMS%20PIC/';
         const cleanFilename = targetFile.replace(/^\/+/, '');
-        image_url = `${cdnBase}${cleanFilename}`;
+        image_url = `${baseImage}${cleanFilename}`;
       }
     }
-    const config_url = pick(row, ['config_url']);
+    let config_url = pick(row, ['config_url']);
+    
+    // Auto-detect config_url if missing but filename exists
+    // ENABLED: We have verified that tiles exist and path issues are resolved.
+    if (!config_url && filename) {
+        const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+        config_url = `/tiles/${nameWithoutExt}/config.json`;
+    }
+
+    // Fix config_url path to use baseImage if relative
+    if (config_url && typeof config_url === 'string') {
+        if (!config_url.startsWith('http') && !config_url.startsWith('/')) {
+            config_url = `/${config_url}`;
+        }
+        // If it starts with 'tiles/', make sure it has leading slash
+        if (config_url.startsWith('tiles/')) {
+             config_url = `/${config_url}`;
+        }
+    }
+
     const date = pick(row, ['captured_at', 'date']);
     const time = pick(row, ['time']);
     const captured_at = date && time ? `${date} ${time}` : (date || '');

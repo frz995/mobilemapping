@@ -15,3 +15,94 @@ html, body, #root {
   height: 100%;
   width: 100%;
 }
+
+/* Custom Hotspot Arrow (Legacy - kept if needed, but unused now) */
+.custom-hotspot-arrow {
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    border: 2px solid white;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    box-shadow: 0 0 15px rgba(0,0,0,0.3);
+    pointer-events: auto; 
+}
+
+.custom-hotspot-arrow:hover {
+    transform: scale(1.2);
+    background: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+    border-color: #60a5fa;
+}
+
+.custom-hotspot-arrow::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0; 
+    height: 0; 
+    border-left: 10px solid transparent;
+    border-right: 10px solid transparent;
+    border-bottom: 16px solid white;
+    transform: translate(-50%, -60%);
+    transition: border-color 0.2s;
+}
+
+.custom-hotspot-arrow:hover::after {
+    border-bottom-color: #60a5fa;
+}
+
+/* Track Path Visualization Dots */
+.track-path-dot-future, .track-path-dot-past {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(0,0,0,0.6);
+    transition: all 0.2s ease-out;
+    pointer-events: auto;
+    /* Attempt to simulate ground perspective */
+    transform: scaleY(0.6);
+}
+
+/* Future points (Blue) */
+.track-path-dot-future {
+    background: rgba(59, 130, 246, 0.9); /* Blue-500 */
+    border: 2px solid white;
+}
+
+/* Past points (Gray/White) */
+.track-path-dot-past {
+    background: rgba(156, 163, 175, 0.7); /* Gray-400 */
+    border: 2px solid rgba(255, 255, 255, 0.8);
+}
+
+.track-path-dot-future:hover, .track-path-dot-past:hover {
+    transform: scale(1.4) scaleY(0.6);
+    z-index: 100;
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+}
+
+.track-path-dot-future:hover {
+    background: #2563eb; /* Blue-600 */
+    border-color: #93c5fd;
+}
+
+.track-path-dot-past:hover {
+    background: #6b7280; /* Gray-500 */
+    border-color: white;
+}
+
+/* No custom styles needed for navigation hotspots anymore */
+
+/* Tooltip style override if needed */
+.pnlm-tooltip span {
+    background-color: rgba(0,0,0,0.7) !important;
+    color: white !important;
+    border-radius: 4px !important;
+    padding: 4px 8px !important;
+    font-family: sans-serif;
+    font-size: 12px;
+}

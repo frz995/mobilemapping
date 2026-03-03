@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Download, Search, MapPin } from 'lucide-react';
 
-const AttributeTable = ({ points, isOpen, onClose, onPointSelect }) => {
+const AttributeTable = ({ points = [], isOpen, onClose, onPointSelect }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'asc' });
 
@@ -11,20 +11,28 @@ const AttributeTable = ({ points, isOpen, onClose, onPointSelect }) => {
   const filteredData = points.filter(point => {
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
-    return (
-      point.id.toString().includes(searchLower) ||
-      (point.subgrid && point.subgrid.toLowerCase().includes(searchLower)) ||
-      (point.date && point.date.includes(searchLower)) ||
-      (point.description && point.description.toLowerCase().includes(searchLower))
-    );
+    
+    const idMatch = point.id != null && point.id.toString().includes(searchLower);
+    const subgridMatch = point.subgrid && typeof point.subgrid === 'string' && point.subgrid.toLowerCase().includes(searchLower);
+    const dateMatch = point.date && typeof point.date === 'string' && point.date.includes(searchLower);
+    const descMatch = point.description && typeof point.description === 'string' && point.description.toLowerCase().includes(searchLower);
+
+    return idMatch || subgridMatch || dateMatch || descMatch;
   });
 
   // Sort
   const sortedData = [...filteredData].sort((a, b) => {
-    if (a[sortConfig.key] < b[sortConfig.key]) {
+    const valA = a[sortConfig.key];
+    const valB = b[sortConfig.key];
+
+    if (valA === valB) return 0;
+    if (valA === null || valA === undefined) return 1;
+    if (valB === null || valB === undefined) return -1;
+
+    if (valA < valB) {
       return sortConfig.direction === 'asc' ? -1 : 1;
     }
-    if (a[sortConfig.key] > b[sortConfig.key]) {
+    if (valA > valB) {
       return sortConfig.direction === 'asc' ? 1 : -1;
     }
     return 0;

@@ -9,11 +9,24 @@ export default function useWfsPoints(baseUrl, typeName) {
   useEffect(() => {
     if (!baseUrl || !typeName) return;
 
+    const controller = new AbortController();
     setLoading(true);
-    fetchWfsPoints(baseUrl, typeName)
+    setError(null);
+
+    fetchWfsPoints(baseUrl, typeName, controller.signal)
       .then(setPoints)
-      .catch(setError)
-      .finally(() => setLoading(false));
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          setError(err);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
   }, [baseUrl, typeName]);
 
   return { points, loading, error };

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, CircleMarker, useMap, useMapEvents, Rectangle, WMSTileLayer, GeoJSON } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -176,32 +176,48 @@ const CoordinatePopup = ({ latlng, onClose }) => {
 // --- Map Interaction Tools ---
 const MapTools = ({ activeTool, onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish, onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick }) => {
   const map = useMap();
+  
+  // Use refs to hold the latest callbacks to avoid re-binding event listeners on every render
+  const callbacksRef = useRef({
+      onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish, 
+      onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick
+  });
+
+  useEffect(() => {
+      callbacksRef.current = {
+          onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish, 
+          onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick
+      };
+  });
 
   useEffect(() => {
     if (!map) return;
 
     const handleClick = (e) => {
-      console.log('Map Clicked:', e.latlng, 'Active Tool:', activeTool);
+      // console.log('Map Clicked:', e.latlng, 'Active Tool:', activeTool);
+      const cbs = callbacksRef.current;
+      
       if (activeTool === 'measure') {
-        onMeasureClick(e.latlng);
+        cbs.onMeasureClick && cbs.onMeasureClick(e.latlng);
       } else if (activeTool === 'extract') {
-        onExtractClick(e.latlng);
+        cbs.onExtractClick && cbs.onExtractClick(e.latlng);
       } else if (activeTool === 'identify') {
-        onIdentifyClick(e.latlng, map);
+        cbs.onIdentifyClick && cbs.onIdentifyClick(e.latlng, map);
       } else if (activeTool === 'polygon-measure') {
-        onPolygonClick(e.latlng);
+        cbs.onPolygonClick && cbs.onPolygonClick(e.latlng);
       } else if (activeTool === 'buffer') {
-        onBufferClick(e.latlng);
+        cbs.onBufferClick && cbs.onBufferClick(e.latlng);
       } else if (activeTool === 'coordinate') {
-        onCoordinateClick(e.latlng);
+        cbs.onCoordinateClick && cbs.onCoordinateClick(e.latlng);
       }
     };
 
     const handleDblClick = (e) => {
+      const cbs = callbacksRef.current;
       if (activeTool === 'measure') {
-        onMeasureFinish(e.latlng);
+        cbs.onMeasureFinish && cbs.onMeasureFinish(e.latlng);
       } else if (activeTool === 'polygon-measure') {
-        onPolygonFinish(e.latlng);
+        cbs.onPolygonFinish && cbs.onPolygonFinish(e.latlng);
       }
     };
 
@@ -220,7 +236,7 @@ const MapTools = ({ activeTool, onMeasureClick, onExtractClick, onIdentifyClick,
       map.off('dblclick', handleDblClick);
       map.getContainer().style.cursor = '';
     };
-  }, [map, activeTool, onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish, onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick]);
+  }, [map, activeTool]); // Dependencies reduced to only essential ones
 
   return null;
 };
@@ -230,7 +246,12 @@ const MapUpdater = ({ selectedPoint }) => {
   const map = useMap();
   useEffect(() => {
     if (selectedPoint) {
-      map.flyTo([selectedPoint.lat, selectedPoint.lon], 18, {
+      // Prevent auto zoom-out: If user is zoomed in deeper than 18, keep current zoom.
+      // Otherwise zoom to 18 to show context.
+      const currentZoom = map.getZoom();
+      const targetZoom = Math.max(currentZoom, 18);
+
+      map.flyTo([selectedPoint.lat, selectedPoint.lon], targetZoom, {
         duration: 1.5
       });
     }
@@ -256,19 +277,36 @@ const MapZoomHandler = ({ trigger, filteredPoints }) => {
   return null;
 };
 
-const MapResizer = () => {
+const MapResizer = ({ resizeTrigger }) => {
   const map = useMap();
+
+  // Robust generic resize observer
   useEffect(() => {
-    map.invalidateSize();
-  });
+    const container = map.getContainer();
+    const resizeObserver = new ResizeObserver(() => {
+       map.invalidateSize();
+    });
+    
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [map]);
+
   return null;
 };
 
 // --- Search Component ---
-const SearchBar = () => {
+const SearchBar = ({ isViewerOpen }) => {
   const map = useMap();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Calculate right margin based on viewer state
+  // If viewer is closed (full screen), we need space for the top-right buttons (approx 120px)
+  // If viewer is open (split screen), map ends at split point and buttons are on the far right of screen, so no overlap
+  const rightMargin = !isViewerOpen ? '120px' : '10px';
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -304,7 +342,7 @@ const SearchBar = () => {
   };
 
   return (
-    <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', margin: '10px', zIndex: 5500 }}>
+    <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', marginTop: '16px', marginRight: rightMargin, marginBottom: '10px', marginLeft: '10px', zIndex: 5500, transition: 'margin-right 0.3s ease' }}>
       <form onSubmit={handleSearch} className="flex items-center bg-white/70 backdrop-blur-md rounded-lg shadow-md overflow-hidden border border-gray-200/50 w-64">
         <input
           type="text"
@@ -330,41 +368,8 @@ const SearchBar = () => {
 };
 
 // --- Static Icons for Normal Markers ---
-const greenDotIcon = L.divIcon({
-  className: 'custom-marker-icon', 
-  html: `
-    <div style="
-      width: 12px; 
-      height: 12px; 
-      background-color: #22c55e;
-      border: 2px solid white;
-      border-radius: 50%;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-      transition: all 0.2s ease;
-    ">
-    </div>
-  `,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6]
-});
+// Removed to use CircleMarker for better performance with large datasets
 
-const redDotIcon = L.divIcon({
-  className: 'custom-marker-icon', 
-  html: `
-    <div style="
-      width: 12px; 
-      height: 12px; 
-      background-color: #ef4444;
-      border: 2px solid white;
-      border-radius: 50%;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-      transition: all 0.2s ease;
-    ">
-    </div>
-  `,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6]
-});
 
 // --- Points Layer (Unselected Points) ---
 // Memoized to prevent re-renders when viewState (yaw) changes
@@ -375,8 +380,8 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
     // Skip the selected point (it's rendered by SelectedMarker)
     if (point.id === selectedPointId) return null;
 
-    // Determine icon based on date filter
-    let icon = greenDotIcon;
+    // Determine color based on date filter
+    let fillColor = '#22c55e'; // green-500
     
     if (filterColorByDate && filterDate) {
        const pointDate = new Date(point.captured_at);
@@ -385,18 +390,29 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
        // If point date is valid and older than threshold -> Red
        if (!isNaN(pointDate.getTime()) && !isNaN(thresholdDate.getTime())) {
          if (pointDate < thresholdDate) {
-           icon = redDotIcon;
+           fillColor = '#ef4444'; // red-500
          }
        }
     }
     
     return (
-      <Marker 
+      <CircleMarker 
         key={point.id} 
-        position={[point.lat, point.lon]}
-        icon={icon}
+        center={[point.lat, point.lon]}
+        radius={6}
+        fillColor={fillColor}
+        color="white"
+        weight={2}
+        opacity={1}
+        fillOpacity={1}
         eventHandlers={{
-          click: () => onPointSelect(point),
+          click: (e) => {
+             // Stop propagation to prevent map click
+             if (e.originalEvent) {
+                 L.DomEvent.stopPropagation(e.originalEvent);
+             }
+             onPointSelect(point);
+          },
         }}
       />
     );
@@ -408,7 +424,8 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
     prevProps.selectedPointId === nextProps.selectedPointId &&
     prevProps.filterColorByDate === nextProps.filterColorByDate &&
     prevProps.filterDate === nextProps.filterDate &&
-    prevProps.activeLayers === nextProps.activeLayers
+    prevProps.activeLayers === nextProps.activeLayers &&
+    prevProps.onPointSelect === nextProps.onPointSelect
   );
 });
 
@@ -419,20 +436,21 @@ const SelectedMarker = ({ point, viewState }) => {
 
   const yaw = viewState?.yaw || 0;
   
-  // Memoize the icon to prevent unnecessary recreation
+  // Memoize the icon to prevent unnecessary recreation which causes flashing
+  // We use a stable ID in the HTML to update rotation via DOM instead of replacing the icon
   const icon = useMemo(() => {
      return L.divIcon({
        className: 'selected-marker-icon',
        html: `
-         <div style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
-           <!-- Cone (Rotated) -->
-           <div style="
+         <div style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+           <!-- Cone (Rotated via JS) -->
+           <div id="cone-rotator-${point.id}" style="
              position: absolute;
              top: 0;
              left: 0;
              width: 100%;
              height: 100%;
-             transform: rotate(${yaw}deg);
+             transition: transform 0.1s linear;
              pointer-events: none;
            ">
              <svg viewBox="0 0 100 100" width="60" height="60" style="overflow: visible;">
@@ -463,18 +481,113 @@ const SelectedMarker = ({ point, viewState }) => {
        iconSize: [60, 60],
        iconAnchor: [30, 30]
      });
-  }, [yaw]);
+  }, [point.id]);
+
+  // Update rotation directly via DOM to avoid Leaflet re-render thrashing
+  useEffect(() => {
+    const el = document.getElementById(`cone-rotator-${point.id}`);
+    if (el) {
+      el.style.transform = `rotate(${yaw}deg)`;
+    }
+  }, [yaw, point.id]);
 
   return (
     <Marker 
       position={[point.lat, point.lon]}
       icon={icon}
       zIndexOffset={1000} // Keep on top
+      interactive={false} // Allow clicks to pass through to underlying points
     />
   );
 };
 
-const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, viewState, qgisWmsUrl, activeLayers, activeBasemap, activeTool, setActiveTool, filterSubgrid, filterDate, filterColorByDate, filterDateStrict, zoomToTrackTrigger }) => {
+// --- Mini Map Component ---
+const MiniMapUpdater = ({ parentCenter, parentZoom }) => {
+  const miniMap = useMap();
+  useEffect(() => {
+    miniMap.setView(parentCenter, parentZoom);
+  }, [parentCenter, parentZoom, miniMap]);
+  return null;
+};
+
+const MiniMap = React.memo(() => {
+  const parentMap = useMap();
+  const [bounds, setBounds] = useState(parentMap.getBounds());
+  const [center, setCenter] = useState(parentMap.getCenter());
+  const [zoom, setZoom] = useState(parentMap.getZoom());
+
+  // Listen to parent map events
+  useMapEvents({
+    move: () => {
+      setCenter(parentMap.getCenter());
+      setBounds(parentMap.getBounds());
+    },
+    zoom: () => {
+      setZoom(parentMap.getZoom());
+      setBounds(parentMap.getBounds());
+    }
+  });
+
+  // Calculate mini map zoom (clamped)
+  const miniMapZoom = Math.max(0, zoom - 5);
+  
+  return (
+    <div className="leaflet-bottom leaflet-left" style={{ pointerEvents: 'auto', marginBottom: '24px', marginLeft: '24px', zIndex: 5500 }}>
+       <div className="w-48 h-36 rounded-2xl shadow-2xl border-4 border-white overflow-hidden relative group hover:scale-105 transition-transform duration-300 ring-1 ring-gray-900/10">
+         <MapContainer
+            center={center}
+            zoom={miniMapZoom}
+            zoomControl={false}
+            scrollWheelZoom={false}
+            doubleClickZoom={false}
+            dragging={false}
+            attributionControl={false}
+            style={{ width: '100%', height: '100%', background: '#f8fafc' }}
+         >
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png" />
+            <MiniMapUpdater parentCenter={center} parentZoom={miniMapZoom} />
+            <Rectangle bounds={bounds} pathOptions={{ color: "#2563eb", weight: 2, fillOpacity: 0.1, dashArray: '4' }} />
+         </MapContainer>
+         
+         {/* Label Overlay */}
+         <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm z-[5501] border border-gray-200/50">
+            OVERVIEW
+         </div>
+       </div>
+    </div>
+  );
+});
+
+// --- Coordinate Display Component ---
+const CoordinateDisplay = () => {
+  const [coords, setCoords] = useState({ lat: 0, lng: 0 });
+
+  useMapEvents({
+    mousemove(e) {
+      setCoords(e.latlng);
+    },
+  });
+
+  return (
+    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-[5500] bg-white/80 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-mono text-gray-700 border border-gray-200 shadow-sm pointer-events-none">
+      EPSG:4326 | Lat: {coords.lat.toFixed(6)}, Lon: {coords.lng.toFixed(6)}
+    </div>
+  );
+};
+
+// --- Basemap Renderer Component ---
+const BaseLayerRenderer = ({ activeBasemap }) => {
+  const currentMap = BASEMAPS.find(b => b.id === activeBasemap) || BASEMAPS[0];
+
+  return (
+    <TileLayer
+      key={currentMap.id}
+      {...currentMap}
+    />
+  );
+};
+
+const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, viewState, qgisWmsUrl, activeLayers, activeBasemap, activeTool, setActiveTool, filterSubgrid, filterDate, filterColorByDate, filterDateStrict, zoomToTrackTrigger, resizeTrigger, isViewerOpen }) => {
   const [measurements, setMeasurements] = useState([]); // Array of polylines
   const [currentMeasurement, setCurrentMeasurement] = useState([]); // Points of current measurement
   const [extractedFeatures, setExtractedFeatures] = useState([]); // Array of markers {id, lat, lng, type}
@@ -604,91 +717,7 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
 
 
 
-  // --- Mini Map Component ---
-  const MiniMapUpdater = ({ parentCenter, parentZoom }) => {
-    const miniMap = useMap();
-    useEffect(() => {
-      miniMap.setView(parentCenter, parentZoom);
-    }, [parentCenter, parentZoom, miniMap]);
-    return null;
-  };
 
-  const MiniMap = () => {
-    const parentMap = useMap();
-    const [bounds, setBounds] = useState(parentMap.getBounds());
-    const [center, setCenter] = useState(parentMap.getCenter());
-    const [zoom, setZoom] = useState(parentMap.getZoom());
-
-    // Listen to parent map events
-    useMapEvents({
-      move: () => {
-        setCenter(parentMap.getCenter());
-        setBounds(parentMap.getBounds());
-      },
-      zoom: () => {
-        setZoom(parentMap.getZoom());
-        setBounds(parentMap.getBounds());
-      }
-    });
-
-    // Calculate mini map zoom (clamped)
-    const miniMapZoom = Math.max(0, zoom - 5);
-    
-    return (
-      <div className="leaflet-bottom leaflet-left" style={{ pointerEvents: 'auto', marginBottom: '24px', marginLeft: '24px', zIndex: 5500 }}>
-         <div className="w-48 h-36 rounded-2xl shadow-2xl border-4 border-white overflow-hidden relative group hover:scale-105 transition-transform duration-300 ring-1 ring-gray-900/10">
-           <MapContainer
-              center={center}
-              zoom={miniMapZoom}
-              zoomControl={false}
-              scrollWheelZoom={false}
-              doubleClickZoom={false}
-              dragging={false}
-              attributionControl={false}
-              style={{ width: '100%', height: '100%', background: '#f8fafc' }}
-           >
-              <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png" />
-              <MiniMapUpdater parentCenter={center} parentZoom={miniMapZoom} />
-              <Rectangle bounds={bounds} pathOptions={{ color: "#2563eb", weight: 2, fillOpacity: 0.1, dashArray: '4' }} />
-           </MapContainer>
-           
-           {/* Label Overlay */}
-           <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm z-[5501] border border-gray-200/50">
-              OVERVIEW
-           </div>
-         </div>
-      </div>
-    );
-  };
-
-  // --- Coordinate Display Component ---
-  const CoordinateDisplay = () => {
-    const [coords, setCoords] = useState({ lat: 0, lng: 0 });
-
-    useMapEvents({
-      mousemove(e) {
-        setCoords(e.latlng);
-      },
-    });
-
-    return (
-      <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-[5500] bg-white/80 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-mono text-gray-700 border border-gray-200 shadow-sm pointer-events-none">
-        EPSG:4326 | Lat: {coords.lat.toFixed(6)}, Lon: {coords.lng.toFixed(6)}
-      </div>
-    );
-  };
-
-  // --- Basemap Renderer Component ---
-  const BaseLayerRenderer = ({ activeBasemap }) => {
-    const currentMap = BASEMAPS.find(b => b.id === activeBasemap) || BASEMAPS[0];
-
-    return (
-      <TileLayer
-        key={currentMap.id}
-        {...currentMap}
-      />
-    );
-  };
 
   return (
     <MapContainer 
@@ -696,12 +725,13 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
       zoom={6} 
       style={{ height: '100%', width: '100%', background: '#f8fafc' }}
       zoomControl={false}
+      preferCanvas={true}
     >
       <MapUpdater selectedPoint={selectedPoint} />
       <MapZoomHandler trigger={zoomToTrackTrigger} filteredPoints={filteredPoints} />
-      <MapResizer />
+      <MapResizer resizeTrigger={resizeTrigger} />
       
-      <SearchBar />
+      <SearchBar isViewerOpen={isViewerOpen} />
       <BaseLayerRenderer activeBasemap={activeBasemap} />
       <MiniMap />
       <CoordinateDisplay />
