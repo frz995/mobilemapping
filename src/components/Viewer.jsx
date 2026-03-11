@@ -441,7 +441,7 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
       
       // Always try to resolve relative paths, regardless of configUrl presence
       if (finalImage && !finalImage.startsWith('http')) {
-         const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || '/';
+         const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || import.meta.env.BASE_URL;
          
          if (baseUrl === '/') {
              if (!finalImage.startsWith('/')) {
