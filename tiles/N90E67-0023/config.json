@@ -1,0 +1,8 @@
+{
+    "type": "equirectangular",
+    "panorama": "/MMS_PIC/N90E67-0023.jpg",
+    "autoLoad": true,
+    "showZoomCtrl": true,
+    "showFullscreenCtrl": true,
+    "compass": false
+}
