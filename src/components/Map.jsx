@@ -246,14 +246,24 @@ const MapUpdater = ({ selectedPoint }) => {
   const map = useMap();
   useEffect(() => {
     if (selectedPoint) {
-      // Prevent auto zoom-out: If user is zoomed in deeper than 18, keep current zoom.
-      // Otherwise zoom to 18 to show context.
+      const { lat, lon } = selectedPoint;
+      const bounds = map.getBounds();
+      // Pad bounds by 5% to check visibility
+      const paddedBounds = bounds.pad(-0.05);
+      const isVisible = paddedBounds.contains([lat, lon]);
+      
       const currentZoom = map.getZoom();
-      const targetZoom = Math.max(currentZoom, 18);
+      // Only force zoom-in if we are too far out
+      const shouldZoomIn = currentZoom < 17;
 
-      map.flyTo([selectedPoint.lat, selectedPoint.lon], targetZoom, {
-        duration: 1.5
-      });
+      // Only fly if point is not comfortably visible OR we need to zoom in
+      if (!isVisible || shouldZoomIn) {
+        const targetZoom = Math.max(currentZoom, 18);
+        map.flyTo([lat, lon], targetZoom, {
+          duration: 1.0,
+          easeLinearity: 0.25
+        });
+      }
     }
   }, [selectedPoint, map]);
   return null;
