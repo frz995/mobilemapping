@@ -467,12 +467,42 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
           config = await res.json();
           if (!isMounted) return;
           
+          console.log('Viewer: Raw config.panorama:', config.panorama);
+          console.log('Viewer: BASE_URL:', import.meta.env.BASE_URL);
+
+          // Fix for absolute paths in config.json when deployed to subdirectory
+          // Specifically targeting MMS_PIC paths which are known to be in public/MMS_PIC
+          if (config.panorama && typeof config.panorama === 'string') {
+              const baseUrl = import.meta.env.BASE_URL;
+              // Ensure baseUrl is defined and not just '/'
+              if (baseUrl && baseUrl !== '/') {
+                   const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+                   
+                   // Case 1: Starts with /MMS_PIC (Absolute path from root, needs base)
+                   if (config.panorama.startsWith('/MMS_PIC')) {
+                       config.panorama = `${cleanBase}${config.panorama}`;
+                       console.log('Viewer: Fixed absolute path:', config.panorama);
+                   }
+                   // Case 2: Starts with MMS_PIC (Relative path, needs base/)
+                   else if (config.panorama.startsWith('MMS_PIC')) {
+                       config.panorama = `${cleanBase}/${config.panorama}`;
+                       console.log('Viewer: Fixed relative path:', config.panorama);
+                   }
+                   // Case 3: Already has base but might be malformed? (Unlikely if logic is correct)
+              }
+          }
+          
           config.autoLoad = true;
           
-          const basePath = configUrl.substring(0, configUrl.lastIndexOf('/') + 1);
-          config.basePath = basePath;
-          
-          console.log('Viewer: Using basePath:', basePath);
+          // Only set basePath if we haven't converted to an absolute path
+          // or if the panorama is relative (not starting with /)
+          if (!config.panorama.startsWith('/')) {
+              const basePath = configUrl.substring(0, configUrl.lastIndexOf('/') + 1);
+              config.basePath = basePath;
+              console.log('Viewer: Using basePath:', basePath);
+          } else {
+              console.log('Viewer: Skipping basePath (panorama is absolute)');
+          }
 
           if (config.multiRes && config.multiRes.fallbackPath) {
               if (config.multiRes.fallbackPath.includes('%s')) {

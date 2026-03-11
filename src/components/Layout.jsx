@@ -214,7 +214,10 @@ const Layout = () => {
         // Create a target object that preserves the point data but adds navigation properties
         // We spread 'p' so that the onNavigate callback receives the full point object
         // Set pitch to -25 to place hotspot on the road
-        forwardTarget = { ...p, yaw: turf.bearing(currentGeo, targetGeo), pitch: -25, distance: dist };
+        // Use relative yaw to align with image center (vehicle front)
+        const absBearing = turf.bearing(currentGeo, targetGeo);
+        const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
+        forwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
         break; 
     }
 
@@ -231,7 +234,9 @@ const Layout = () => {
 
         if (dist < MIN_DIST) continue;
 
-        backwardTarget = { ...p, yaw: turf.bearing(currentGeo, targetGeo), pitch: -25, distance: dist };
+        const absBearing = turf.bearing(currentGeo, targetGeo);
+        const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
+        backwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
         break;
     }
 
