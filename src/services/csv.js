@@ -49,17 +49,30 @@ export async function fetchCsv(url, signal) {
     // ENABLED: We have verified that tiles exist and path issues are resolved.
     if (!config_url && filename) {
         const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-        config_url = `/tiles/${nameWithoutExt}/config.json`;
+        // Use BASE_URL from vite config to ensure correct path on GitHub Pages
+        const baseUrl = import.meta.env.BASE_URL;
+        config_url = `${baseUrl}tiles/${nameWithoutExt}/config.json`;
     }
 
-    // Fix config_url path to use baseImage if relative
+    // Fix config_url path if relative
     if (config_url && typeof config_url === 'string') {
-        if (!config_url.startsWith('http') && !config_url.startsWith('/')) {
-            config_url = `/${config_url}`;
-        }
-        // If it starts with 'tiles/', make sure it has leading slash
-        if (config_url.startsWith('tiles/')) {
-             config_url = `/${config_url}`;
+        const baseUrl = import.meta.env.BASE_URL;
+        
+        if (!config_url.startsWith('http')) {
+            // If it starts with /, check if it already includes the base path
+            if (config_url.startsWith('/')) {
+                // If base is /mobilemapping/ and url is /tiles/..., we might want to prepend base
+                // BUT usually / implies domain root. 
+                // Let's assume if it starts with /, it's intentional, UNLESS it's missing the repo name
+                if (baseUrl !== '/' && !config_url.startsWith(baseUrl)) {
+                     // e.g. /tiles/ -> /mobilemapping/tiles/
+                     // Remove leading slash to append to baseUrl
+                     config_url = `${baseUrl}${config_url.substring(1)}`;
+                }
+            } else {
+                // Relative path: prepend base
+                config_url = `${baseUrl}${config_url}`;
+            }
         }
     }
 
