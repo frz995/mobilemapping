@@ -95,14 +95,13 @@ html, body, #root {
     border-color: white;
 }
 
-/* No custom styles needed for navigation hotspots anymore */
+/* Measurement Line Animation */
+@keyframes drawLine {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
 
-/* Tooltip style override if needed */
-.pnlm-tooltip span {
-    background-color: rgba(0,0,0,0.7) !important;
-    color: white !important;
-    border-radius: 4px !important;
-    padding: 4px 8px !important;
-    font-family: sans-serif;
-    font-size: 12px;
+.animate-draw-line {
+  animation: drawLine 0.6s ease-out forwards;
 }
