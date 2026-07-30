@@ -1,0 +1,5 @@
+QGIS : postgres
+pass: Skrillex951
+
+pgadmin : 360WEB
+pass : Skrillex95!

@@ -409,6 +409,10 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
     let intervalId = null;
     let resizeObserver = null;
 
+    // Reset error & loading state whenever image or configUrl changes
+    setIsLoading(true);
+    setError(null);
+
     // Cleanup function for event listeners attached to container
     const cleanupListeners = () => {
       if (viewerContainerRef.current) {
@@ -440,22 +444,28 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
       let finalImage = image;
       
       // Always try to resolve relative paths, regardless of configUrl presence
-      if (finalImage && !finalImage.startsWith('http')) {
-         const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || import.meta.env.BASE_URL;
-         
-         if (baseUrl === '/') {
-             if (!finalImage.startsWith('/')) {
-                 finalImage = `/${finalImage}`;
+      if (finalImage && typeof finalImage === 'string') {
+         if (finalImage.startsWith('/http')) finalImage = finalImage.substring(1);
+          if (finalImage.startsWith('http')) {
+             // Encode any raw spaces in cloud URLs to avoid 400 Bad Request
+             finalImage = encodeURI(decodeURI(finalImage));
+          } else {
+             const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || import.meta.env.BASE_URL;
+             
+             if (baseUrl === '/') {
+                 if (!finalImage.startsWith('/')) {
+                     finalImage = `/${finalImage}`;
+                 }
+             } else {
+                 const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+                 if (!finalImage.startsWith(cleanBase)) {
+                     const cleanImage = finalImage.startsWith('/') ? finalImage.substring(1) : finalImage;
+                     finalImage = `${cleanBase}${cleanImage}`;
+                 }
              }
-         } else {
-             const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-             if (!finalImage.startsWith(cleanBase)) {
-                 const cleanImage = finalImage.startsWith('/') ? finalImage.substring(1) : finalImage;
-                 finalImage = `${cleanBase}${cleanImage}`;
-             }
-         }
-         
-         console.log('Viewer: Resolved image path:', finalImage);
+             
+             console.log('Viewer: Resolved image path:', finalImage);
+          }
       }
 
       // Initialize viewer
@@ -470,25 +480,28 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
           console.log('Viewer: Raw config.panorama:', config.panorama);
           console.log('Viewer: BASE_URL:', import.meta.env.BASE_URL);
 
-          // Fix for absolute paths in config.json when deployed to subdirectory
-          // Specifically targeting MMS_PIC paths which are known to be in public/MMS_PIC
+          // Fix for absolute paths in config.json when deployed to subdirectory or cloud storage
           if (config.panorama && typeof config.panorama === 'string') {
-              const baseUrl = import.meta.env.BASE_URL;
-              // Ensure baseUrl is defined and not just '/'
-              if (baseUrl && baseUrl !== '/') {
-                   const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-                   
-                   // Case 1: Starts with /MMS_PIC (Absolute path from root, needs base)
-                   if (config.panorama.startsWith('/MMS_PIC')) {
-                       config.panorama = `${cleanBase}${config.panorama}`;
-                       console.log('Viewer: Fixed absolute path:', config.panorama);
+              const customImageBase = import.meta.env.VITE_IMAGE_BASE_URL;
+              if (customImageBase && customImageBase.trim() !== '') {
+                   let cleanCustomBase = customImageBase.trim();
+                   if (cleanCustomBase.startsWith('/http')) cleanCustomBase = cleanCustomBase.substring(1);
+                   const cleanBase = cleanCustomBase.endsWith('/') ? cleanCustomBase : `${cleanCustomBase}/`;
+                   const filename = config.panorama.replace(/^\/+/, '').replace(/^MMS_PIC\//, '');
+                   config.panorama = `${cleanBase}${filename}`;
+                   console.log('Viewer: Resolved cloud panorama path:', config.panorama);
+              } else {
+                   const baseUrl = import.meta.env.BASE_URL;
+                   if (baseUrl && baseUrl !== '/') {
+                        const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+                        if (config.panorama.startsWith('/MMS_PIC')) {
+                            config.panorama = `${cleanBase}${config.panorama}`;
+                            console.log('Viewer: Fixed absolute path:', config.panorama);
+                        } else if (config.panorama.startsWith('MMS_PIC')) {
+                            config.panorama = `${cleanBase}/${config.panorama}`;
+                            console.log('Viewer: Fixed relative path:', config.panorama);
+                        }
                    }
-                   // Case 2: Starts with MMS_PIC (Relative path, needs base/)
-                   else if (config.panorama.startsWith('MMS_PIC')) {
-                       config.panorama = `${cleanBase}/${config.panorama}`;
-                       console.log('Viewer: Fixed relative path:', config.panorama);
-                   }
-                   // Case 3: Already has base but might be malformed? (Unlikely if logic is correct)
               }
           }
           
@@ -496,12 +509,12 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
           
           // Only set basePath if we haven't converted to an absolute path
           // or if the panorama is relative (not starting with /)
-          if (!config.panorama.startsWith('/')) {
+          if (!config.panorama.startsWith('/') && !config.panorama.startsWith('http')) {
               const basePath = configUrl.substring(0, configUrl.lastIndexOf('/') + 1);
               config.basePath = basePath;
               console.log('Viewer: Using basePath:', basePath);
           } else {
-              console.log('Viewer: Skipping basePath (panorama is absolute)');
+              console.log('Viewer: Skipping basePath (panorama is absolute/cloud URL)');
           }
 
           if (config.multiRes && config.multiRes.fallbackPath) {
@@ -532,11 +545,27 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
           
           console.log('Viewer: Resolved config', config);
         } catch (err) {
-            console.error("Error loading tile config:", err);
+            console.warn("Tile config not found, falling back to direct image:", err.message);
             config = {
                 type: 'equirectangular',
                 panorama: finalImage,
+                haov: 360,
+                vaov: 180,
+                vOffset: 0,
                 autoLoad: true,
+                autoRotate: 0,
+                sceneFadeDuration: 0,
+                crossOrigin: 'anonymous',
+                yaw: initialYaw || 0,
+                pitch: initialPitch || 0,
+                hfov: initialHfov || 100,
+                minHfov: 50,
+                maxHfov: 120,
+                showZoomCtrl: true,
+                showFullscreenCtrl: true,
+                compass: false,
+                hotSpotDebug: false,
+                hotSpots: hotSpots || [],
             };
         }
       } else {
@@ -687,7 +716,7 @@ const Viewer = forwardRef(({ image, configUrl, initialYaw, initialPitch, initial
         try {
           // Force aggressive cleanup of WebGL context
           const renderer = viewerInstanceRef.current.getRenderer();
-          if (renderer) {
+          if (renderer && typeof renderer.getContext === 'function') {
               const gl = renderer.getContext();
               if (gl) {
                   const ext = gl.getExtension('WEBGL_lose_context');

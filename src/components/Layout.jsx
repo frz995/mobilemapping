@@ -5,12 +5,14 @@ import Viewer from './Viewer';
 import AttributeTable from './AttributeTable';
 import useCsvPoints from '../hooks/useCsvPoints';
 import useWfsPoints from '../hooks/useWfsPoints';
-import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera } from 'lucide-react';
+import useAuth from '../hooks/useAuth';
+import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera, LogOut } from 'lucide-react';
 import * as turf from '@turf/turf';
 
 const EMPTY_HOTSPOTS = [];
 
 const Layout = () => {
+  const { user, signOut } = useAuth();
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [viewState, setViewState] = useState({ yaw: 0, pitch: 0, hfov: 100 });
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -351,6 +353,29 @@ const Layout = () => {
         setIsViewerOpen={setIsViewerOpen}
       />
       
+      {/* User info + Logout button — top-right floating badge */}
+      {user && (
+        <div className="absolute top-3 right-4 z-50 flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-1.5 shadow-lg">
+            <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
+              {user.email?.[0]?.toUpperCase() ?? 'U'}
+            </div>
+            <span className="text-gray-300 text-xs max-w-[140px] truncate">{user.email}</span>
+          </div>
+          <button
+            id="logout-btn"
+            onClick={signOut}
+            title="Sign Out"
+            className="flex items-center gap-1.5 bg-gray-900/80 backdrop-blur-md border border-gray-700/50
+                       hover:bg-red-600/80 hover:border-red-500/50 text-gray-300 hover:text-white
+                       rounded-xl px-3 py-1.5 text-xs font-medium transition-all duration-200 shadow-lg"
+          >
+            <LogOut size={14} />
+            Sign Out
+          </button>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <div 
         className="flex-1 flex flex-row h-full relative transition-all duration-300" 

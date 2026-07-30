@@ -39,17 +39,19 @@ export async function fetchCsv(url, signal) {
     if (!image_url || (typeof image_url === 'string' && !image_url.startsWith('http'))) {
       const targetFile = image_url || filename;
       if (targetFile) {
-        const cleanFilename = targetFile.replace(/^\/+/, '');
-        image_url = `${baseImage}${cleanFilename}`;
+        let cleanBase = baseImage;
+        if (cleanBase.startsWith('/http')) cleanBase = cleanBase.substring(1);
+        const cleanFilename = targetFile.replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');
+        const finalBase = cleanBase.endsWith('/') ? cleanBase : `${cleanBase}/`;
+        image_url = `${finalBase}${cleanFilename}`;
       }
     }
     let config_url = pick(row, ['config_url']);
     
-    // Auto-detect config_url if missing but filename exists
-    // ENABLED: We have verified that tiles exist and path issues are resolved.
-    if (!config_url && filename) {
+    // Auto-detect config_url if missing but filename exists (ONLY when using local tiles, not cloud storage)
+    const isCloudStorage = baseImage && baseImage.startsWith('http');
+    if (!config_url && filename && !isCloudStorage) {
         const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-        // Use BASE_URL from vite config to ensure correct path on GitHub Pages
         const baseUrl = import.meta.env.BASE_URL;
         config_url = `${baseUrl}tiles/${nameWithoutExt}/config.json`;
     }

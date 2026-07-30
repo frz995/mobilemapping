@@ -34,16 +34,18 @@ export async function fetchWfsPoints(baseUrl, typeName, signal) {
         let image_url = props.image_url || props.url;
         let config_url = props.config_url || '';
         
-        // Auto-detect config_url if missing but filename exists (for tiles)
-         if (!config_url && filename) {
+         // Auto-detect config_url if missing but filename exists (ONLY for local tiles, not cloud storage)
+         const isCloudStorage = baseImage && baseImage.startsWith('http');
+         if (!config_url && filename && !isCloudStorage) {
               const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-              // IMPORTANT: Use absolute path from root for fetch
-              // Ensure we don't double slash if baseImage already has one, but here we want local tiles
               config_url = `/tiles/${nameWithoutExt}/config.json`;
          }
 
         if (!image_url && filename) {
-          image_url = baseImage ? `${baseImage.replace(/\/$/, '')}/${filename}` : filename;
+          let cleanBase = baseImage;
+          if (cleanBase && cleanBase.startsWith('/http')) cleanBase = cleanBase.substring(1);
+          const cleanFilename = filename.replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');
+          image_url = cleanBase ? `${cleanBase.replace(/\/$/, '')}/${cleanFilename}` : filename;
         }
 
         let subgrid = props.subgrid || props.grid;
