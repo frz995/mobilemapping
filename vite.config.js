@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   // Set base to '/mobilemapping/' for GitHub Pages deployment
-  base: '/mobilemapping/',
+  base: '/',
   resolve: {
     alias: {
       'mapbox-gl': 'maplibre-gl'
