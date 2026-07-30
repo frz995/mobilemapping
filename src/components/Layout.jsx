@@ -6,6 +6,7 @@ import AttributeTable from './AttributeTable';
 import useCsvPoints from '../hooks/useCsvPoints';
 import useWfsPoints from '../hooks/useWfsPoints';
 import useAuth from '../hooks/useAuth';
+import { useSupabasePoints } from '../hooks/useSupabasePoints';
 import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera, LogOut } from 'lucide-react';
 import * as turf from '@turf/turf';
 
@@ -22,9 +23,9 @@ const Layout = () => {
   const [activeLayers, setActiveLayers] = useState(['panotrack']);
   const [activeBasemap, setActiveBasemap] = useState('osm');
   const [isViewerOpen, setIsViewerOpen] = useState(true);
-  
+
   const viewerRef = useRef(null);
-  
+
   // --- Filter State ---
   const [filterSubgrid, setFilterSubgrid] = useState('');
   const [filterDate, setFilterDate] = useState(''); // ISO Date string YYYY-MM-DD
@@ -41,20 +42,9 @@ const Layout = () => {
   }, []);
 
   const qgisWmsUrl = import.meta.env.VITE_QGIS_WMS_URL || undefined;
-  
-  // Decide whether to use CSV or WFS based on env vars
-  const geoserverUrl = import.meta.env.VITE_GEOSERVER_URL;
-  const geoserverLayer = import.meta.env.VITE_GEOSERVER_LAYER;
-  const useWfs = !!(geoserverUrl && geoserverLayer);
 
-  const csvUrl = import.meta.env.VITE_METADATA_CSV_URL || '/metadata.csv';
-  
-  const { points: csvPoints, loading: csvLoading, error: csvError } = useCsvPoints(useWfs ? null : csvUrl);
-  const { points: wfsPoints, loading: wfsLoading, error: wfsError } = useWfsPoints(geoserverUrl, geoserverLayer);
-  
-  const points = useWfs ? wfsPoints : csvPoints;
-  const pointsLoading = useWfs ? wfsLoading : csvLoading;
-  const pointsError = useWfs ? wfsError : csvError;
+  // Fetch data directly from Supabase
+  const { points, loading: pointsLoading, error: pointsError } = useSupabasePoints();
 
   // Show error toast/notification if data fetching fails
   useEffect(() => {
@@ -67,13 +57,13 @@ const Layout = () => {
   // --- Filter Logic (Lifted from Map.jsx) ---
   const filteredPoints = useMemo(() => {
     if (!points) return [];
-    
+
     return points.filter(point => {
       // 1. Subgrid Filter
       if (filterSubgrid && filterSubgrid.trim() !== '') {
         const searchTerms = filterSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(s => s);
         const pointSubgrid = (point.subgrid || '').toLowerCase();
-        
+
         if (searchTerms.length > 0) {
           const matches = searchTerms.some(term => pointSubgrid.includes(term));
           if (!matches) return false;
@@ -82,14 +72,14 @@ const Layout = () => {
 
       // 2. Date Filter (Strict)
       if (filterDateStrict && filterDate) {
-         const pointDate = new Date(point.captured_at);
-         const thresholdDate = new Date(filterDate);
-         if (!isNaN(pointDate.getTime()) && !isNaN(thresholdDate.getTime())) {
-            // Hide older points
-            if (pointDate < thresholdDate) return false;
-         }
+        const pointDate = new Date(point.captured_at);
+        const thresholdDate = new Date(filterDate);
+        if (!isNaN(pointDate.getTime()) && !isNaN(thresholdDate.getTime())) {
+          // Hide older points
+          if (pointDate < thresholdDate) return false;
+        }
       }
-      
+
       return true;
     });
   }, [points, filterSubgrid, filterDate, filterDateStrict]);
@@ -139,18 +129,18 @@ const Layout = () => {
 
   const handleSnapshot = React.useCallback(async () => {
     if (!viewerRef.current || !selectedPoint) return;
-    
+
     const dataUrl = await viewerRef.current.captureSnapshot({
       id: selectedPoint.id,
       date: selectedPoint.captured_at,
       lat: selectedPoint.lat,
       lon: selectedPoint.lon
     });
-    
+
     if (dataUrl) {
       const link = document.createElement('a');
       link.href = dataUrl;
-      link.download = `snapshot_${selectedPoint.id}_${new Date().toISOString().slice(0,10)}.jpg`;
+      link.download = `snapshot_${selectedPoint.id}_${new Date().toISOString().slice(0, 10)}.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -173,73 +163,73 @@ const Layout = () => {
   // Calculate navigation hotspots (arrows on the road)
   const navTargets = useMemo(() => {
     if (!selectedPoint || !filteredPoints.length) return [];
-    
+
     const currentIndex = filteredPoints.findIndex(p => p.id === selectedPoint.id);
     if (currentIndex === -1) return [];
 
     const spots = [];
     // Ensure we have valid coordinates
     if (!selectedPoint.lon || !selectedPoint.lat) return [];
-    
+
     const currentGeo = turf.point([selectedPoint.lon, selectedPoint.lat]);
 
     // Calculate navigation targets for hover-based navigation
     // We want the immediate "Next" point, preventing skips unless points are essentially duplicates (< 1m)
     const MIN_DIST = 1; // Minimum distance in meters to consider a move valid
-    
+
     let forwardTarget = null;
     let backwardTarget = null;
 
     // Helper to calculate relative yaw
     const getRelativeYaw = (absBearing, vehicleHeading) => {
-        let rel = absBearing - vehicleHeading;
-        while (rel > 180) rel -= 360;
-        while (rel < -180) rel += 360;
-        return rel;
+      let rel = absBearing - vehicleHeading;
+      while (rel > 180) rel -= 360;
+      while (rel < -180) rel += 360;
+      return rel;
     };
 
     // Find Forward Target (Next in sequence)
     for (let i = 1; i <= 5; i++) { // Reduced lookahead window since we want immediate next
-        const idx = currentIndex + i;
-        if (idx >= filteredPoints.length) break;
-        
-        const p = filteredPoints[idx];
-        if (!p.lon || !p.lat) continue;
+      const idx = currentIndex + i;
+      if (idx >= filteredPoints.length) break;
 
-        const targetGeo = turf.point([p.lon, p.lat]);
-        const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
-        
-        // Only skip if it's practically the same point (GPS jitter / stop)
-        if (dist < MIN_DIST) continue;
+      const p = filteredPoints[idx];
+      if (!p.lon || !p.lat) continue;
 
-        // Found the first valid next point
-        // Create a target object that preserves the point data but adds navigation properties
-        // We spread 'p' so that the onNavigate callback receives the full point object
-        // Set pitch to -25 to place hotspot on the road
-        // Use relative yaw to align with image center (vehicle front)
-        const absBearing = turf.bearing(currentGeo, targetGeo);
-        const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
-        forwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
-        break; 
+      const targetGeo = turf.point([p.lon, p.lat]);
+      const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+
+      // Only skip if it's practically the same point (GPS jitter / stop)
+      if (dist < MIN_DIST) continue;
+
+      // Found the first valid next point
+      // Create a target object that preserves the point data but adds navigation properties
+      // We spread 'p' so that the onNavigate callback receives the full point object
+      // Set pitch to -25 to place hotspot on the road
+      // Use relative yaw to align with image center (vehicle front)
+      const absBearing = turf.bearing(currentGeo, targetGeo);
+      const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
+      forwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+      break;
     }
 
     // Find Backward Target (Previous in sequence)
     for (let i = 1; i <= 5; i++) {
-        const idx = currentIndex - i;
-        if (idx < 0) break;
-        
-        const p = filteredPoints[idx];
-        if (!p.lon || !p.lat) continue;
+      const idx = currentIndex - i;
+      if (idx < 0) break;
 
-        const targetGeo = turf.point([p.lon, p.lat]);
-        const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+      const p = filteredPoints[idx];
+      if (!p.lon || !p.lat) continue;
 
-        if (dist < MIN_DIST) continue;
+      const targetGeo = turf.point([p.lon, p.lat]);
+      const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
 
-        const absBearing = turf.bearing(currentGeo, targetGeo);
-        const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
-        backwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
-        break;
+      if (dist < MIN_DIST) continue;
+
+      const absBearing = turf.bearing(currentGeo, targetGeo);
+      const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
+      backwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+      break;
     }
 
     // Return array of valid targets for Viewer to iterate
@@ -271,7 +261,7 @@ const Layout = () => {
     // Calculate percentage based on window width
     // Adjust for sidebar width if needed, but absolute mouse position is easier
     const newSplit = (e.clientX / window.innerWidth) * 100;
-    
+
     // Constraints (min 20%, max 80%)
     if (newSplit > 20 && newSplit < 80) {
       setSplitRatio(newSplit);
@@ -309,14 +299,14 @@ const Layout = () => {
       if (point.image_url) {
         let url = point.image_url;
         // Match Viewer.jsx logic for CDN
-         if (!url.startsWith('http')) {
-            const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || '/';
-            // Only prepend if not already present
-            const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-            if (!url.startsWith(cleanBase)) {
-                 url = `${cleanBase}${url.startsWith('/') ? url.substring(1) : url}`;
-            }
-         }
+        if (!url.startsWith('http')) {
+          const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || '/';
+          // Only prepend if not already present
+          const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+          if (!url.startsWith(cleanBase)) {
+            url = `${cleanBase}${url.startsWith('/') ? url.substring(1) : url}`;
+          }
+        }
         const img = new Image();
         img.src = url;
       }
@@ -325,11 +315,11 @@ const Layout = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-50 text-gray-900 relative font-sans">
-      
+
       {/* Sidebar - Fixed overlay */}
-      <Sidebar 
-        isOpen={sidebarOpen} 
-        setIsOpen={setSidebarOpen} 
+      <Sidebar
+        isOpen={sidebarOpen}
+        setIsOpen={setSidebarOpen}
         qgisWmsUrl={qgisWmsUrl}
         activeLayers={activeLayers}
         setActiveLayers={setActiveLayers}
@@ -352,7 +342,7 @@ const Layout = () => {
         isViewerOpen={isViewerOpen}
         setIsViewerOpen={setIsViewerOpen}
       />
-      
+
       {/* User info + Logout button — top-right floating badge */}
       {user && (
         <div className="absolute top-3 right-4 z-50 flex items-center gap-2">
@@ -377,59 +367,59 @@ const Layout = () => {
       )}
 
       {/* Main Content Area */}
-      <div 
-        className="flex-1 flex flex-row h-full relative transition-all duration-300" 
+      <div
+        className="flex-1 flex flex-row h-full relative transition-all duration-300"
       >
-        
+
         {/* Left Panel: Map */}
-        <div 
-            className="h-full relative overflow-hidden flex flex-col transition-all duration-300"
-            style={{ width: isViewerOpen ? `${splitRatio}%` : '100%' }}
-          >
-               {pointsError && (
-                 <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
-                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                   </svg>
-                   <span>Failed to load map data. Please check your connection.</span>
-                 </div>
-               )}
-               <div className="flex-1 relative min-h-0">
-                 <MapComponent 
-                   points={activeLayers.includes('panotrack') ? points : []} 
-                   filteredPoints={filteredPoints}
-                 selectedPoint={selectedPoint} 
-                 onPointSelect={handleMapPointSelect}
-                 viewState={viewState}
-                 activeLayers={activeLayers}
-                 activeBasemap={activeBasemap}
-                 activeTool={activeTool}
-                 setActiveTool={setActiveTool}
-                 qgisWmsUrl={qgisWmsUrl}
-                 filterSubgrid={filterSubgrid}
-                 filterDate={filterDate}
-                 filterColorByDate={filterColorByDate}
-                 filterDateStrict={filterDateStrict}
-                 zoomToTrackTrigger={zoomToTrackTrigger}
-                 resizeTrigger={isViewerOpen ? splitRatio : 100}
-                 isViewerOpen={isViewerOpen}
-               />
-             </div>
-             
-             <AttributeTable 
-                points={filteredPoints}
-                isOpen={isTableOpen}
-                onClose={() => setIsTableOpen(false)}
-                onPointSelect={(point) => {
-                   handlePointSelect(point);
-                   if (!isViewerOpen) setIsViewerOpen(true);
-                }}
-             />
+        <div
+          className="h-full relative overflow-hidden flex flex-col transition-all duration-300"
+          style={{ width: isViewerOpen ? `${splitRatio}%` : '100%' }}
+        >
+          {pointsError && (
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>Failed to load map data. Please check your connection.</span>
+            </div>
+          )}
+          <div className="flex-1 relative min-h-0">
+            <MapComponent
+              points={activeLayers.includes('panotrack') ? points : []}
+              filteredPoints={filteredPoints}
+              selectedPoint={selectedPoint}
+              onPointSelect={handleMapPointSelect}
+              viewState={viewState}
+              activeLayers={activeLayers}
+              activeBasemap={activeBasemap}
+              activeTool={activeTool}
+              setActiveTool={setActiveTool}
+              qgisWmsUrl={qgisWmsUrl}
+              filterSubgrid={filterSubgrid}
+              filterDate={filterDate}
+              filterColorByDate={filterColorByDate}
+              filterDateStrict={filterDateStrict}
+              zoomToTrackTrigger={zoomToTrackTrigger}
+              resizeTrigger={isViewerOpen ? splitRatio : 100}
+              isViewerOpen={isViewerOpen}
+            />
+          </div>
+
+          <AttributeTable
+            points={filteredPoints}
+            isOpen={isTableOpen}
+            onClose={() => setIsTableOpen(false)}
+            onPointSelect={(point) => {
+              handlePointSelect(point);
+              if (!isViewerOpen) setIsViewerOpen(true);
+            }}
+          />
         </div>
 
         {/* Divider */}
         {isViewerOpen && (
-          <div 
+          <div
             className="w-1 bg-gray-800 hover:bg-blue-500 cursor-col-resize z-10 flex items-center justify-center relative hover:shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-colors"
             onMouseDown={startDrag}
           >
@@ -439,85 +429,84 @@ const Layout = () => {
 
         {/* Right Panel: Viewer */}
         {isViewerOpen && (
-          <div 
+          <div
             className="h-full bg-black relative flex flex-col overflow-hidden"
             style={{ width: `${100 - splitRatio}%` }}
           >
             {selectedPoint ? (
-            <>
-              <Viewer 
-                // key={selectedPoint.id} // REMOVED: Prevent remounting to avoid WebGL context churn
-                ref={viewerRef}
-                image={selectedPoint.image_url} 
-                configUrl={selectedPoint.config_url}
-                initialYaw={selectedPoint.bearing}
-                initialPitch={0}
-                initialHfov={100}
-                onViewChange={handleViewChange}
-                navTargets={navTargets}
-                onNavigate={handlePointSelect}
-                hotSpots={pathHotspots}
-              />
-              {/* Playback Controls Overlay */}
-              <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-white/80 backdrop-blur-xl rounded-2xl p-2 flex items-center gap-2 shadow-2xl border border-white/50 z-20 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1">
-                <button 
-                  onClick={handlePrevFrame}
-                  className="p-2.5 hover:bg-gray-100 text-gray-500 hover:text-blue-600 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed group"
-                  disabled={!selectedPoint || filteredPoints.indexOf(selectedPoint) <= 0}
-                  title="Previous Frame"
-                >
-                  <SkipBack size={20} className="group-hover:-translate-x-0.5 transition-transform" />
-                </button>
-                
-                <button 
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  className={`p-3 rounded-xl transition-all shadow-sm transform active:scale-95 flex items-center justify-center ${
-                    isPlaying 
-                      ? 'bg-red-50 text-red-500 hover:bg-red-100 ring-1 ring-red-200' 
+              <>
+                <Viewer
+                  // key={selectedPoint.id} // REMOVED: Prevent remounting to avoid WebGL context churn
+                  ref={viewerRef}
+                  image={selectedPoint.image_url}
+                  configUrl={selectedPoint.config_url}
+                  initialYaw={selectedPoint.bearing}
+                  initialPitch={0}
+                  initialHfov={100}
+                  onViewChange={handleViewChange}
+                  navTargets={navTargets}
+                  onNavigate={handlePointSelect}
+                  hotSpots={pathHotspots}
+                />
+                {/* Playback Controls Overlay */}
+                <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-white/80 backdrop-blur-xl rounded-2xl p-2 flex items-center gap-2 shadow-2xl border border-white/50 z-20 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1">
+                  <button
+                    onClick={handlePrevFrame}
+                    className="p-2.5 hover:bg-gray-100 text-gray-500 hover:text-blue-600 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed group"
+                    disabled={!selectedPoint || filteredPoints.indexOf(selectedPoint) <= 0}
+                    title="Previous Frame"
+                  >
+                    <SkipBack size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+                  </button>
+
+                  <button
+                    onClick={() => setIsPlaying(!isPlaying)}
+                    className={`p-3 rounded-xl transition-all shadow-sm transform active:scale-95 flex items-center justify-center ${isPlaying
+                      ? 'bg-red-50 text-red-500 hover:bg-red-100 ring-1 ring-red-200'
                       : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-blue-600'
-                  }`}
-                  title={isPlaying ? "Pause" : "Play Walkthrough"}
-                >
-                  {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
-                </button>
+                      }`}
+                    title={isPlaying ? "Pause" : "Play Walkthrough"}
+                  >
+                    {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
+                  </button>
 
-                <button 
-                  onClick={handleNextFrame}
-                  className="p-2.5 hover:bg-gray-100 text-gray-500 hover:text-blue-600 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed group"
-                  disabled={!selectedPoint || filteredPoints.indexOf(selectedPoint) >= filteredPoints.length - 1}
-                  title="Next Frame"
-                >
-                  <SkipForward size={20} className="group-hover:translate-x-0.5 transition-transform" />
-                </button>
-                
-                <div className="w-px h-8 bg-gray-200 mx-1"></div>
-                
-                <div className="flex flex-col items-center px-2 min-w-[60px]">
-                   <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Frame</span>
-                   <div className="text-sm font-bold text-gray-700 font-mono leading-none">
-                     {filteredPoints.indexOf(selectedPoint) + 1}<span className="text-gray-300 font-normal mx-1">/</span>{filteredPoints.length}
-                   </div>
+                  <button
+                    onClick={handleNextFrame}
+                    className="p-2.5 hover:bg-gray-100 text-gray-500 hover:text-blue-600 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed group"
+                    disabled={!selectedPoint || filteredPoints.indexOf(selectedPoint) >= filteredPoints.length - 1}
+                    title="Next Frame"
+                  >
+                    <SkipForward size={20} className="group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+
+                  <div className="w-px h-8 bg-gray-200 mx-1"></div>
+
+                  <div className="flex flex-col items-center px-2 min-w-[60px]">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Frame</span>
+                    <div className="text-sm font-bold text-gray-700 font-mono leading-none">
+                      {filteredPoints.indexOf(selectedPoint) + 1}<span className="text-gray-300 font-normal mx-1">/</span>{filteredPoints.length}
+                    </div>
+                  </div>
+
+                  <div className="w-px h-8 bg-gray-200 mx-1"></div>
+
+                  <button
+                    onClick={handleSnapshot}
+                    className="p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-xl transition-all group"
+                    title="Take Snapshot (Save Image)"
+                  >
+                    <Camera size={20} className="group-hover:scale-110 transition-transform" />
+                  </button>
                 </div>
-
-                <div className="w-px h-8 bg-gray-200 mx-1"></div>
-
-                <button 
-                  onClick={handleSnapshot}
-                  className="p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-xl transition-all group"
-                  title="Take Snapshot (Save Image)"
-                >
-                  <Camera size={20} className="group-hover:scale-110 transition-transform" />
-                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-gray-500 bg-gray-900 select-none">
+                <Maximize2 size={64} className="mb-4 opacity-30" />
+                <p className="text-lg font-light">Select a location on the map</p>
+                <p className="text-sm opacity-50 mt-2">to view 360° imagery</p>
               </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-gray-500 bg-gray-900 select-none">
-              <Maximize2 size={64} className="mb-4 opacity-30" />
-              <p className="text-lg font-light">Select a location on the map</p>
-              <p className="text-sm opacity-50 mt-2">to view 360° imagery</p>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
         )}
 
       </div>
