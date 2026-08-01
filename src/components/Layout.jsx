@@ -480,14 +480,14 @@ const Layout = () => {
             )}
 
             {/* Playback Controls Overlay - ALWAYS VISIBLE */}
-            <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-white/80 backdrop-blur-xl rounded-2xl p-2 flex items-center gap-2 shadow-2xl border border-white/50 z-50 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1">
+            <div className="absolute bottom-3 sm:bottom-8 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl rounded-xl sm:rounded-2xl p-1 sm:p-2 flex items-center gap-1 sm:gap-2 shadow-2xl border border-white/50 z-50 max-w-[calc(100vw-1rem)]">
               <button
                 onClick={handlePrevFrame}
-                className="p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group"
+                className="p-1.5 sm:p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-lg sm:rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group shrink-0"
                 disabled={selectedPoint && filteredPoints.indexOf(selectedPoint) <= 0}
                 title="Previous Frame"
               >
-                <SkipBack size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+                <SkipBack className="w-4 h-4 sm:w-5 sm:h-5 group-hover:-translate-x-0.5 transition-transform" />
               </button>
 
               <button
@@ -497,51 +497,51 @@ const Layout = () => {
                   }
                   setIsPlaying(!isPlaying);
                 }}
-                className={`p-3 rounded-xl transition-all shadow-sm transform active:scale-95 flex items-center justify-center ${isPlaying
+                className={`p-2 sm:p-3 rounded-lg sm:rounded-xl transition-all shadow-sm transform active:scale-95 flex items-center justify-center shrink-0 ${isPlaying
                   ? 'bg-red-50 text-red-500 hover:bg-red-100 ring-1 ring-red-200'
-                  : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-blue-600'
+                  : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg ring-1 ring-blue-600'
                   }`}
                 title={isPlaying ? "Pause" : "Play Walkthrough"}
               >
-                {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
+                {isPlaying ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current ml-0.5" />}
               </button>
 
               <button
                 onClick={handleNextFrame}
-                className="p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group"
+                className="p-1.5 sm:p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-lg sm:rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group shrink-0"
                 disabled={selectedPoint && filteredPoints.indexOf(selectedPoint) >= filteredPoints.length - 1}
                 title="Next Frame"
               >
-                <SkipForward size={20} className="group-hover:translate-x-0.5 transition-transform" />
+                <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-0.5 transition-transform" />
               </button>
 
-              <div className="w-px h-8 bg-gray-200 mx-1"></div>
+              <div className="w-px h-6 sm:h-8 bg-gray-200 mx-0.5 sm:mx-1 shrink-0"></div>
 
-              <div className="flex flex-col items-center px-2 min-w-[60px]">
-                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Frame</span>
-                <div className="text-sm font-bold text-gray-700 font-mono leading-none">
-                  {selectedPoint ? filteredPoints.indexOf(selectedPoint) + 1 : 0}<span className="text-gray-300 font-normal mx-1">/</span>{filteredPoints.length}
+              <div className="flex flex-col items-center px-1 sm:px-2 min-w-[45px] sm:min-w-[60px] shrink-0">
+                <span className="text-[8px] sm:text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Frame</span>
+                <div className="text-xs sm:text-sm font-bold text-gray-700 font-mono leading-none">
+                  {selectedPoint ? filteredPoints.indexOf(selectedPoint) + 1 : 0}<span className="text-gray-300 font-normal mx-0.5 sm:mx-1">/</span>{filteredPoints.length}
                 </div>
               </div>
 
-              <div className="w-px h-8 bg-gray-200 mx-1"></div>
+              <div className="w-px h-6 sm:h-8 bg-gray-200 mx-0.5 sm:mx-1 shrink-0"></div>
 
               <button
                 onClick={handleSnapshot}
-                className="p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-xl transition-all group disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-1.5 sm:p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-lg sm:rounded-xl transition-all group disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
                 disabled={!selectedPoint}
                 title="Take Snapshot (Save Image)"
               >
-                <Camera size={20} className="group-hover:scale-110 transition-transform" />
+                <Camera className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" />
               </button>
 
               <button
                 onClick={handlePdfReport}
-                className="p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-xl transition-all group disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-1.5 sm:p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-lg sm:rounded-xl transition-all group disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
                 disabled={!selectedPoint}
                 title="Generate PDF Survey Inspection Report"
               >
-                <FileText size={20} className="group-hover:scale-110 transition-transform" />
+                <FileText className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" />
               </button>
             </div>
           </div>

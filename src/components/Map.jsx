@@ -352,24 +352,24 @@ const SearchBar = ({ isViewerOpen }) => {
   };
 
   return (
-    <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', marginTop: '16px', marginRight: rightMargin, marginBottom: '10px', marginLeft: '10px', zIndex: 5500, transition: 'margin-right 0.3s ease' }}>
-      <form onSubmit={handleSearch} className="flex items-center bg-white/70 backdrop-blur-md rounded-lg shadow-md overflow-hidden border border-gray-200/50 w-64">
+    <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', marginTop: '12px', marginRight: rightMargin, marginBottom: '10px', marginLeft: '10px', zIndex: 5500, transition: 'margin-right 0.3s ease' }}>
+      <form onSubmit={handleSearch} className="flex items-center bg-white/80 backdrop-blur-md rounded-xl shadow-md overflow-hidden border border-gray-200/50 w-36 sm:w-64">
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search address or lat,lon..."
-          className="flex-1 px-3 py-2 text-sm text-gray-700 bg-transparent focus:outline-none placeholder-gray-500"
+          placeholder="Search..."
+          className="flex-1 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-gray-700 bg-transparent focus:outline-none placeholder-gray-500 min-w-0"
         />
         <button 
           type="submit" 
-          className="p-2 bg-transparent text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center"
+          className="p-1.5 sm:p-2 bg-transparent text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center shrink-0"
           disabled={loading}
         >
           {loading ? (
-            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
           ) : (
-            <Search size={16} />
+            <Search size={15} />
           )}
         </button>
       </form>
@@ -579,8 +579,8 @@ const CoordinateDisplay = () => {
   });
 
   return (
-    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-[5500] bg-white/80 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-mono text-gray-700 border border-gray-200 shadow-sm pointer-events-none">
-      EPSG:4326 | Lat: {coords.lat.toFixed(6)}, Lon: {coords.lng.toFixed(6)}
+    <div className="absolute bottom-1 right-12 z-[5500] bg-white/80 backdrop-blur-md px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-mono text-gray-700 border border-gray-200/80 shadow-sm pointer-events-none">
+      EPSG:4326 | Lat: {coords.lat.toFixed(5)}, Lon: {coords.lng.toFixed(5)}
     </div>
   );
 };

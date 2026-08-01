@@ -33,13 +33,13 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
     <div className="fixed inset-0 pointer-events-none z-[5000]">
       
       {/* Top Left Container: Burger + Account + Title + Toolbox */}
-      <div className="absolute top-4 left-4 flex items-center gap-3 pointer-events-auto z-[3000]">
+      <div className="absolute top-2 left-2 sm:top-4 sm:left-4 flex items-center gap-1.5 sm:gap-3 pointer-events-auto z-[3000] max-w-[calc(100vw-5rem)]">
         {/* Burger Menu Button */}
         <button 
           onClick={() => setIsDrawerOpen(true)}
-          className="bg-white/70 backdrop-blur-md p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-10 w-10 flex items-center justify-center shrink-0"
+          className="bg-white/80 backdrop-blur-md p-1.5 sm:p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-9 w-9 sm:h-10 sm:w-10 flex items-center justify-center shrink-0"
         >
-          <Menu size={20} />
+          <Menu size={18} />
         </button>
 
         {/* Account Widget - Fixed Pill Trigger + Floating Dropdown Panel */}
@@ -50,22 +50,22 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
               type="button"
               title="User Account"
               onClick={() => setIsUserToastExpanded(prev => !prev)}
-              className="bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center px-2.5 h-10 gap-2 hover:bg-white hover:shadow-md transition-all duration-300"
+              className="bg-white/80 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center px-2 sm:px-2.5 h-9 sm:h-10 gap-1.5 sm:gap-2 hover:bg-white hover:shadow-md transition-all duration-300"
             >
-              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0">
                 {user.email?.[0]?.toUpperCase() ?? 'U'}
               </div>
-              <span className="text-xs font-bold text-gray-700 max-w-[120px] truncate hidden sm:inline">
+              <span className="text-xs font-bold text-gray-700 max-w-[100px] truncate hidden md:inline">
                 {user.email?.split('@')[0]}
               </span>
-              <ChevronDown size={14} className={clsx("text-gray-500 transition-transform duration-300", isUserToastExpanded && "rotate-180")} />
+              <ChevronDown size={14} className={clsx("text-gray-500 transition-transform duration-300 hidden sm:inline", isUserToastExpanded && "rotate-180")} />
             </button>
 
             {/* Floating Account Dropdown Panel */}
             {isUserToastExpanded && (
-              <div className="absolute left-0 top-12 w-64 bg-white/95 backdrop-blur-md border border-gray-200/80 rounded-2xl shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="absolute left-0 top-11 w-60 sm:w-64 bg-white/95 backdrop-blur-md border border-gray-200/80 rounded-2xl shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
-                  <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold shadow-md">
+                  <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold shadow-md shrink-0">
                     {user.email?.[0]?.toUpperCase() ?? 'U'}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -89,12 +89,12 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
           </div>
         )}
 
-        {/* Map Title Card */}
-        <div className="bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center p-1.5 gap-3 min-w-[220px] pr-4 h-10 transition-all duration-300">
-          <div className="w-7 h-7 bg-transparent rounded-lg flex items-center justify-center shrink-0">
-            <MapIcon className="text-blue-600" size={18} />
+        {/* Map Title Card - Hidden text on small mobile screens to prevent overflow */}
+        <div className="bg-white/80 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center p-1.5 gap-2.5 sm:min-w-[200px] pr-2 sm:pr-4 h-9 sm:h-10 transition-all duration-300 shrink-0">
+          <div className="w-6 h-6 sm:w-7 sm:h-7 bg-transparent rounded-lg flex items-center justify-center shrink-0">
+            <MapIcon className="text-blue-600" size={16} />
           </div>
-          <div className="flex flex-col justify-center h-full">
+          <div className="hidden sm:flex flex-col justify-center h-full">
             <h1 className="text-xs font-extrabold text-gray-800 tracking-tight leading-none font-display">360° Web Mapping</h1>
             <span className="text-[8px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">StreetView Imagery</span>
           </div>
