@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { X, Download, Search, MapPin } from 'lucide-react';
 
-const AttributeTable = ({ points = [], isOpen, onClose, onPointSelect }) => {
+const AttributeTable = ({ points = [], isOpen, onClose, onPointSelect, selectedLayer }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'asc' });
 
   if (!isOpen) return null;
+
+  const layerTitle = selectedLayer?.name || 'Panotrack (360° Survey Views)';
 
   // Filter
   const filteredData = points.filter(point => {
@@ -68,7 +70,10 @@ const AttributeTable = ({ points = [], isOpen, onClose, onPointSelect }) => {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
         <div className="flex items-center gap-4">
-          <h3 className="font-semibold text-gray-700">Attribute Table ({sortedData.length} features)</h3>
+          <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+            <span className="text-blue-600 font-bold">{layerTitle}</span>
+            <span className="text-xs text-gray-400">({sortedData.length} features)</span>
+          </h3>
           <div className="relative">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
             <input 

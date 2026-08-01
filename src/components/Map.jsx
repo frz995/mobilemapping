@@ -313,10 +313,11 @@ const SearchBar = ({ isViewerOpen }) => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Calculate right margin based on viewer state
-  // If viewer is closed (full screen), we need space for the top-right buttons (approx 120px)
-  // If viewer is open (split screen), map ends at split point and buttons are on the far right of screen, so no overlap
-  const rightMargin = !isViewerOpen ? '120px' : '10px';
+  // Calculate right margin based on viewer state.
+  // When viewer is closed (full-width map), reserve space for top-right buttons:
+  //   theme toggle (72px) + viewer toggle (40px) + basemap (40px) + gaps + padding ≈ 200px
+  // When viewer is open, the buttons sit on the far right of the full screen beyond the map edge.
+  const rightMargin = !isViewerOpen ? '200px' : '10px';
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -352,7 +353,7 @@ const SearchBar = ({ isViewerOpen }) => {
   };
 
   return (
-    <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', marginTop: '12px', marginRight: rightMargin, marginBottom: '10px', marginLeft: '10px', zIndex: 5500, transition: 'margin-right 0.3s ease' }}>
+    <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', marginTop: '12px', marginRight: rightMargin, marginBottom: '10px', marginLeft: '10px', zIndex: 1000, transition: 'margin-right 0.3s ease' }}>
       <form onSubmit={handleSearch} className="flex items-center bg-white/80 backdrop-blur-md rounded-xl shadow-md overflow-hidden border border-gray-200/50 w-36 sm:w-64">
         <input
           type="text"
@@ -542,7 +543,7 @@ const MiniMap = React.memo(() => {
   const miniMapZoom = Math.max(0, zoom - 5);
   
   return (
-    <div className="leaflet-bottom leaflet-left" style={{ pointerEvents: 'auto', marginBottom: '24px', marginLeft: '24px', zIndex: 5500 }}>
+    <div className="leaflet-bottom leaflet-left" style={{ pointerEvents: 'auto', marginBottom: '24px', marginLeft: '24px', zIndex: 1000 }}>
        <div className="w-48 h-36 rounded-2xl shadow-2xl border-4 border-white overflow-hidden relative group hover:scale-105 transition-transform duration-300 ring-1 ring-gray-900/10">
          <MapContainer
             center={center}
@@ -597,7 +598,7 @@ const BaseLayerRenderer = ({ activeBasemap }) => {
   );
 };
 
-const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, viewState, qgisWmsUrl, activeLayers, activeBasemap, activeTool, setActiveTool, filterSubgrid, filterDate, filterColorByDate, filterDateStrict, zoomToTrackTrigger, resizeTrigger, isViewerOpen }) => {
+const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, viewState, qgisWmsUrl, activeLayers, activeBasemap, activeTool, setActiveTool, filterSubgrid, filterDate, filterColorByDate, filterDateStrict, zoomToTrackTrigger, resizeTrigger, isViewerOpen, isDrawingExportBBox, onBoundaryDrawn }) => {
   const [measurements, setMeasurements] = useState([]); // Array of polylines
   const [currentMeasurement, setCurrentMeasurement] = useState([]); // Points of current measurement
   const [extractedFeatures, setExtractedFeatures] = useState([]); // Array of markers {id, lat, lng, type}
@@ -618,42 +619,6 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
       setCurrentPolygon([]);
       setBuffers([]);
       setCoordinateInfo(null);
-      setActiveTool(null);
-    } else if (activeTool === 'download') {
-      const data = {
-        type: "FeatureCollection",
-        features: [
-          ...extractedFeatures.map(f => ({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [f.lng, f.lat] },
-            properties: { type: "extracted_point", id: f.id }
-          })),
-          ...measurements.map((m, i) => ({
-            type: "Feature",
-            geometry: { type: "LineString", coordinates: m.map(p => [p.lng, p.lat]) },
-            properties: { type: "measurement", id: i }
-          })),
-          ...polygonMeasurements.map((p, i) => ({
-            type: "Feature",
-            geometry: { 
-              type: "Polygon", 
-              coordinates: [[...p.positions.map(pos => [pos.lng, pos.lat]), [p.positions[0].lng, p.positions[0].lat]]] 
-            },
-            properties: { type: "polygon_measurement", id: i, area: p.area }
-          })),
-          ...buffers.map((b, i) => ({
-             ...b,
-             properties: { ...b.properties, id: `buffer_${i}` }
-          }))
-        ]
-      };
-      
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `map_data_${new Date().toISOString().slice(0,10)}.geojson`;
-      a.click();
       setActiveTool(null);
     } else if (activeTool === 'clear') {
       setMeasurements([]);
@@ -692,11 +657,16 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
       const polygon = turf.polygon([coordinates]);
       const area = turf.area(polygon); // sq meters
 
-      setPolygonMeasurements(prev => [...prev, {
-        id: Date.now(),
-        positions: positions,
-        area: area
-      }]);
+      if (isDrawingExportBBox && onBoundaryDrawn) {
+        const pointsInside = filteredPoints.filter(p => turf.booleanPointInPolygon(turf.point([p.lon, p.lat]), polygon));
+        onBoundaryDrawn(pointsInside);
+      } else {
+        setPolygonMeasurements(prev => [...prev, {
+          id: Date.now(),
+          positions: positions,
+          area: area
+        }]);
+      }
       setCurrentPolygon([]);
     }
   };
@@ -752,18 +722,24 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
       
       {/* Active Tool Guidance Helper Banner */}
       {activeTool && !['download', 'clear'].includes(activeTool) && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-[3000] bg-slate-900/90 backdrop-blur-md border border-slate-700/80 text-white text-xs px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
-          <span className="font-semibold text-blue-400">
-            {activeTool === 'measure' && '📐 Distance Tool: Click map to add points. Double-click to finish line.'}
-            {activeTool === 'polygon-measure' && '⬡ Area Tool: Click map to draw polygon points. Double-click to calculate area.'}
-            {activeTool === 'extract' && '🖋️ Feature Extractor: Click on map to place digitized point features.'}
-            {activeTool === 'identify' && '📍 Identify Tool: Click any map feature or location to view GIS details.'}
-            {activeTool === 'buffer' && '⃝ Buffer Analysis: Click on map to enter radius and generate buffer zone.'}
-            {activeTool === 'coordinate' && '🎯 Coords Converter: Click on map to convert location to DD / DMS / UTM.'}
+        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-[3000] bg-white/95 backdrop-blur-md border border-gray-200/90 text-gray-800 text-xs px-4 py-2 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <span className="font-semibold text-gray-700">
+            {activeTool === 'measure' && <><span className="text-blue-600 font-bold">📐 Distance Tool:</span> Click map to add points. Double-click to finish line.</>}
+            {activeTool === 'polygon-measure' && (
+              isDrawingExportBBox ? (
+                <><span className="text-blue-600 font-bold">✏️ Draw Export Boundary:</span> Click map to draw boundary points. Double-click to complete export area.</>
+              ) : (
+                <><span className="text-blue-600 font-bold">⬡ Area Tool:</span> Click map to draw polygon points. Double-click to calculate area.</>
+              )
+            )}
+            {activeTool === 'extract' && <><span className="text-blue-600 font-bold">🖋️ Feature Extractor:</span> Click on map to place digitized point features.</>}
+            {activeTool === 'identify' && <><span className="text-blue-600 font-bold">📍 Identify Tool:</span> Click any map feature or location to view GIS details.</>}
+            {activeTool === 'buffer' && <><span className="text-blue-600 font-bold">⃝ Buffer Analysis:</span> Click on map to enter radius and generate buffer zone.</>}
+            {activeTool === 'coordinate' && <><span className="text-blue-600 font-bold">🎯 Coords Converter:</span> Click on map to convert location to DD / DMS / UTM.</>}
           </span>
           <button 
             onClick={() => setActiveTool(null)}
-            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-red-400 rounded-lg transition-colors"
+            className="p-1 text-gray-400 hover:text-red-500 hover:bg-gray-100 rounded-lg transition-colors"
             title="Cancel Tool"
           >
             <X size={14} />

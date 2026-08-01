@@ -3,10 +3,15 @@ import Sidebar from './Sidebar';
 import MapComponent from './Map';
 import Viewer from './Viewer';
 import AttributeTable from './AttributeTable';
+import UploadModal from './UploadModal';
+import ExportModal from './ExportModal';
+import LayerSelectModal from './LayerSelectModal';
+import MyAccountModal from './MyAccountModal';
 import useCsvPoints from '../hooks/useCsvPoints';
 import useWfsPoints from '../hooks/useWfsPoints';
 import useAuth from '../hooks/useAuth';
 import { useSupabasePoints } from '../hooks/useSupabasePoints';
+import { useSessionStats } from '../hooks/useSessionStats';
 import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera, LogOut, FileText } from 'lucide-react';
 import { generatePdfInspectionReport } from '../services/pdfReportService';
 import * as turf from '@turf/turf';
@@ -15,16 +20,38 @@ const EMPTY_HOTSPOTS = [];
 
 const Layout = () => {
   const { user, signOut } = useAuth();
+  const {
+    stats: usageStats,
+    recordSessionStart,
+    trackPointVisit,
+    trackNavStep,
+    trackMapClick,
+    trackSnapshot,
+    trackPdfReport,
+    trackBasemapChange,
+    trackToolUsed,
+    trackPlayback,
+    trackExport,
+    resetStats,
+  } = useSessionStats();
+
+  // Record session start once on mount
+  useEffect(() => { recordSessionStart(); }, []);
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [viewState, setViewState] = useState({ yaw: 0, pitch: 0, hfov: 100 });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTool, setActiveTool] = useState(null); // 'measure', 'extract', 'identify', 'polygon-measure', 'buffer', 'coordinate'
   const [isTableOpen, setIsTableOpen] = useState(false);
+  const [isLayerSelectOpen, setIsLayerSelectOpen] = useState(false);
+  const [selectedTableLayer, setSelectedTableLayer] = useState(null);
+  const [isDrawingExportBBox, setIsDrawingExportBBox] = useState(false);
+  const [customBBoxPoints, setCustomBBoxPoints] = useState(null);
   const [splitRatio, setSplitRatio] = useState(50); // 50% split
   const [activeLayers, setActiveLayers] = useState(['panotrack']);
-  const [activeBasemap, setActiveBasemap] = useState('osm');
+  const [activeBasemap, setActiveBasemap] = useState('positron');
   const [isViewerOpen, setIsViewerOpen] = useState(true);
   const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
+  const [isAccountOpen, setIsAccountOpen] = useState(false);
 
   const viewerRef = useRef(null);
 
@@ -143,14 +170,13 @@ const Layout = () => {
 
   const handleSnapshot = React.useCallback(async () => {
     if (!viewerRef.current || !selectedPoint) return;
-
+    trackSnapshot();
     const dataUrl = await viewerRef.current.captureSnapshot({
       id: selectedPoint.id,
       date: selectedPoint.captured_at,
       lat: selectedPoint.lat,
       lon: selectedPoint.lon
     });
-
     if (dataUrl) {
       const link = document.createElement('a');
       link.href = dataUrl;
@@ -159,10 +185,11 @@ const Layout = () => {
       link.click();
       document.body.removeChild(link);
     }
-  }, [selectedPoint]);
+  }, [selectedPoint, trackSnapshot]);
 
   const handlePdfReport = React.useCallback(async () => {
     if (!selectedPoint) return;
+    trackPdfReport();
     let snapshotUrl = null;
     if (viewerRef.current) {
       snapshotUrl = await viewerRef.current.captureSnapshot({
@@ -176,7 +203,7 @@ const Layout = () => {
       point: selectedPoint,
       snapshotDataUrl: snapshotUrl
     });
-  }, [selectedPoint]);
+  }, [selectedPoint, trackPdfReport]);
 
   // Extract unique subgrids for filter dropdown
   const uniqueSubgrids = React.useMemo(() => {
@@ -269,19 +296,26 @@ const Layout = () => {
 
   const handlePointSelect = React.useCallback((point) => {
     setSelectedPoint(point);
-    // When selecting a new point, reset view to its bearing
     setViewState(prev => ({ ...prev, yaw: point.bearing }));
-  }, []);
+    trackPointVisit(point?.subgrid);
+  }, [trackPointVisit]);
 
   const handleViewChange = React.useCallback((newView) => {
     setViewState((prev) => ({ ...prev, ...newView }));
   }, []);
 
-  // Stable callback for map point selection to prevent PointsLayer re-renders
+  // Stable callback for map point selection — also counts as a map click
   const handleMapPointSelect = React.useCallback((point) => {
     handlePointSelect(point);
     setIsViewerOpen(true);
-  }, [handlePointSelect]);
+    trackMapClick();
+  }, [handlePointSelect, trackMapClick]);
+
+  // Navigate via hotspot arrow — counts as nav step
+  const handleNavigate = React.useCallback((point) => {
+    handlePointSelect(point);
+    trackNavStep();
+  }, [handlePointSelect, trackNavStep]);
 
   // Calculate path visualization hotspots (flat crosses on the road)
   // DISABLED: User requested to remove track path visualization
@@ -369,9 +403,9 @@ const Layout = () => {
         activeLayers={activeLayers}
         setActiveLayers={setActiveLayers}
         activeBasemap={activeBasemap}
-        setActiveBasemap={setActiveBasemap}
+        setActiveBasemap={(id) => { setActiveBasemap(id); trackBasemapChange(); }}
         activeTool={activeTool}
-        setActiveTool={setActiveTool}
+        setActiveTool={(tool) => { setActiveTool(tool); if (tool) trackToolUsed(); }}
         filterSubgrid={filterSubgrid}
         setFilterSubgrid={setFilterSubgrid}
         availableSubgrids={uniqueSubgrids}
@@ -384,10 +418,23 @@ const Layout = () => {
         onZoomToTrack={handleZoomToTrack}
         isTableOpen={isTableOpen}
         setIsTableOpen={setIsTableOpen}
+        onOpenLayerSelect={() => setIsLayerSelectOpen(true)}
         isViewerOpen={isViewerOpen}
         setIsViewerOpen={setIsViewerOpen}
+        onOpenAccount={() => setIsAccountOpen(true)}
         user={user}
         signOut={signOut}
+      />
+
+      {/* Layer Selection Popup Modal before opening Attribute Table */}
+      <LayerSelectModal
+        isOpen={isLayerSelectOpen}
+        onClose={() => setIsLayerSelectOpen(false)}
+        activeLayers={activeLayers}
+        onSelectLayer={(layer) => {
+          setSelectedTableLayer(layer);
+          setIsTableOpen(true);
+        }}
       />
 
       {/* Main Content Area */}
@@ -427,12 +474,19 @@ const Layout = () => {
               zoomToTrackTrigger={zoomToTrackTrigger}
               resizeTrigger={isViewerOpen ? splitRatio : 100}
               isViewerOpen={isViewerOpen}
+              isDrawingExportBBox={isDrawingExportBBox}
+              onBoundaryDrawn={(pointsInside) => {
+                setCustomBBoxPoints(pointsInside);
+                setIsDrawingExportBBox(false);
+                setActiveTool('export');
+              }}
             />
           </div>
 
           <AttributeTable
             points={filteredPoints}
             isOpen={isTableOpen}
+            selectedLayer={selectedTableLayer}
             onClose={() => setIsTableOpen(false)}
             onPointSelect={(point) => {
               handlePointSelect(point);
@@ -459,7 +513,6 @@ const Layout = () => {
           >
             {selectedPoint ? (
               <Viewer
-                // key={selectedPoint.id} // REMOVED: Prevent remounting to avoid WebGL context churn
                 ref={viewerRef}
                 image={selectedPoint.image_url}
                 configUrl={selectedPoint.config_url}
@@ -468,8 +521,9 @@ const Layout = () => {
                 initialHfov={100}
                 onViewChange={handleViewChange}
                 navTargets={navTargets}
-                onNavigate={handlePointSelect}
+                onNavigate={handleNavigate}
                 hotSpots={pathHotspots}
+                selectedPoint={selectedPoint}
               />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-gray-500 bg-gray-900 select-none">
@@ -495,6 +549,7 @@ const Layout = () => {
                   if (!selectedPoint && filteredPoints.length > 0) {
                     handlePointSelect(filteredPoints[0]);
                   }
+                  if (!isPlaying) trackPlayback();
                   setIsPlaying(!isPlaying);
                 }}
                 className={`p-2 sm:p-3 rounded-lg sm:rounded-xl transition-all shadow-sm transform active:scale-95 flex items-center justify-center shrink-0 ${isPlaying
@@ -548,6 +603,39 @@ const Layout = () => {
         )}
 
       </div>
+
+      {/* Upload Spatial File Modal */}
+      <UploadModal
+        isOpen={activeTool === 'upload'}
+        onClose={() => setActiveTool(null)}
+        onUploadSuccess={(uploadInfo) => {
+          console.log("Uploaded spatial file successfully:", uploadInfo);
+          setActiveTool(null);
+        }}
+      />
+
+      {/* Advanced Spatial Data Export Modal */}
+      <ExportModal
+        isOpen={activeTool === 'download' || activeTool === 'export'}
+        onClose={() => {
+          setActiveTool(null);
+          setIsDrawingExportBBox(false);
+        }}
+        dataPoints={customBBoxPoints || filteredPoints}
+        onStartDrawBBox={() => {
+          setIsDrawingExportBBox(true);
+          setActiveTool('polygon-measure');
+        }}
+      />
+      {/* My Account Modal */}
+      <MyAccountModal
+        isOpen={isAccountOpen}
+        onClose={() => setIsAccountOpen(false)}
+        user={user}
+        signOut={signOut}
+        usageStats={usageStats}
+        onResetStats={resetStats}
+      />
     </div>
   );
 };

@@ -126,4 +126,170 @@ html, body, #root {
   pointer-events: none !important;
 }
 
+/* ============================================================
+   DARK THEME - applied via [data-theme="dark"] on <html>
+   ============================================================ */
+
+[data-theme="dark"] body,
+[data-theme="dark"] #root {
+  background-color: #0f1117;
+  color: #e2e8f0;
+}
+
+/* Main app wrapper */
+[data-theme="dark"] .bg-gray-50 {
+  background-color: #0f1117 !important;
+}
+[data-theme="dark"] .text-gray-900 {
+  color: #f1f5f9 !important;
+}
+
+/* ---------- Glass Cards / Floating Panels ---------- */
+[data-theme="dark"] .bg-white\/80,
+[data-theme="dark"] .bg-white\/90,
+[data-theme="dark"] .bg-white\/95,
+[data-theme="dark"] .bg-white\/70 {
+  background-color: rgba(22, 28, 40, 0.88) !important;
+}
+[data-theme="dark"] .bg-white {
+  background-color: #1a2035 !important;
+}
+[data-theme="dark"] .bg-gray-50\/80,
+[data-theme="dark"] .bg-gray-50\/50,
+[data-theme="dark"] .bg-gray-50 {
+  background-color: rgba(15, 17, 26, 0.85) !important;
+}
+
+/* ---------- Borders ---------- */
+[data-theme="dark"] .border-gray-200\/50,
+[data-theme="dark"] .border-gray-200\/80,
+[data-theme="dark"] .border-gray-200,
+[data-theme="dark"] .border-gray-100\/50,
+[data-theme="dark"] .border-gray-100 {
+  border-color: rgba(55, 65, 90, 0.6) !important;
+}
+
+/* ---------- Text ---------- */
+[data-theme="dark"] .text-gray-800 { color: #e2e8f0 !important; }
+[data-theme="dark"] .text-gray-700 { color: #cbd5e1 !important; }
+[data-theme="dark"] .text-gray-600 { color: #94a3b8 !important; }
+[data-theme="dark"] .text-gray-500 { color: #64748b !important; }
+[data-theme="dark"] .text-gray-400 { color: #475569 !important; }
+
+/* ---------- Dividers & HR ---------- */
+[data-theme="dark"] .border-gray-100,
+[data-theme="dark"] hr { border-color: rgba(55, 65, 90, 0.5) !important; }
+
+/* ---------- Toolbox / Tool Buttons ---------- */
+[data-theme="dark"] .bg-white\/40 {
+  background-color: rgba(22, 28, 40, 0.5) !important;
+}
+[data-theme="dark"] .hover\:bg-white\/50:hover {
+  background-color: rgba(30, 38, 55, 0.7) !important;
+}
+[data-theme="dark"] .hover\:bg-gray-50:hover,
+[data-theme="dark"] .hover\:bg-gray-100:hover {
+  background-color: rgba(30, 38, 55, 0.7) !important;
+}
+
+/* Toolbox panel */
+[data-theme="dark"] .bg-white\/70 {
+  background-color: rgba(22, 28, 40, 0.8) !important;
+}
+
+/* ---------- Drawer / Sidebar ---------- */
+[data-theme="dark"] .fixed.top-0.left-0.h-full {
+  background-color: #131929 !important;
+}
+
+/* ---------- Layer Panel items ---------- */
+[data-theme="dark"] .bg-blue-50\/50 {
+  background-color: rgba(30, 58, 138, 0.12) !important;
+}
+[data-theme="dark"] .hover\:bg-blue-50:hover {
+  background-color: rgba(30, 58, 138, 0.15) !important;
+}
+
+/* ---------- Form inputs ---------- */
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background-color: #1e2a3a !important;
+  color: #cbd5e1 !important;
+  border-color: rgba(55, 65, 90, 0.7) !important;
+}
+
+/* ---------- Custom checkbox ---------- */
+[data-theme="dark"] .w-4.h-4.rounded.border:not(.bg-blue-600) {
+  background-color: #1e2a3a !important;
+  border-color: rgba(55, 65, 90, 0.8) !important;
+}
+
+/* ---------- Basemap dropdown ---------- */
+[data-theme="dark"] .bg-white\/90.backdrop-blur-md.rounded-xl {
+  background-color: rgba(20, 26, 42, 0.96) !important;
+}
+[data-theme="dark"] .bg-gray-50\/80 {
+  background-color: rgba(15, 20, 30, 0.9) !important;
+}
+[data-theme="dark"] .w-full.p-2.bg-white\/90 {
+  background-color: rgba(20, 26, 42, 0.95) !important;
+}
+[data-theme="dark"] .border-gray-200.hover\:border-gray-300.hover\:shadow-sm.bg-white {
+  background-color: rgba(24, 32, 52, 0.96) !important;
+}
+
+/* ---------- Split divider ---------- */
+[data-theme="dark"] .bg-gray-800 {
+  background-color: #0a0e1a !important;
+}
+
+/* ---------- Playback bar ---------- */
+[data-theme="dark"] .bg-white\/90.backdrop-blur-xl {
+  background-color: rgba(20, 26, 42, 0.92) !important;
+}
+[data-theme="dark"] .bg-gray-200 {
+  background-color: rgba(55, 65, 90, 0.5) !important;
+}
+
+/* ---------- Export / Upload Modal ---------- */
+[data-theme="dark"] .bg-white.rounded-2xl,
+[data-theme="dark"] .bg-white.rounded-xl {
+  background-color: #141a2e !important;
+}
+
+/* ---------- Scrollbar in dark mode ---------- */
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: #1a2035;
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* ---------- Tooltip popups ---------- */
+[data-theme="dark"] .bg-gray-800.text-white {
+  background-color: #0f172a !important;
+}
+
+/* Theme transition for smooth toggle */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color;
+  transition-duration: 250ms;
+  transition-timing-function: ease;
+}
+
+/* Exclude transition from animations that would be disrupted */
+.transition-transform, .transition-none,
+.leaflet-tile, .leaflet-container,
+canvas, video, img {
+  transition: none !important;
+}
+
+/* Restore specific transitions we need */
+.transition-all { transition-property: all !important; }
+.transition-colors { transition-property: color, background-color, border-color !important; }
 

@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
-import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight, LogOut } from 'lucide-react';
+import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Upload, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight, LogOut, Sun, Moon } from 'lucide-react';
 import clsx from 'clsx';
 import { BASEMAPS } from '../config/basemaps';
+import { useTheme } from '../context/ThemeContext';
 
-const MenuLink = ({ icon: Icon, label, active }) => (
-  <button className={clsx("w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium", active ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-50")}>
+const MenuLink = ({ icon: Icon, label, active, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium ${active ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}
+  >
     <Icon size={18} />
     <span>{label}</span>
+    {onClick && <span className="ml-auto text-gray-300"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6"/></svg></span>}
   </button>
 );
 
-const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, isViewerOpen, setIsViewerOpen, user, signOut }) => {
+const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut }) => {
   const layers = [
     { name: 'panotrack', title: 'Panotrack (360 Views)' }
   ];
@@ -20,6 +25,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
   const [isToolboxOpen, setIsToolboxOpen] = useState(false);
   const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(null);
+  const { isDark, toggleTheme } = useTheme();
 
   const toggleLayer = (layerName) => {
     if (activeLayers.includes(layerName)) {
@@ -30,7 +36,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
   };
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-[5000]">
+    <div className="fixed inset-0 pointer-events-none z-[9000]">
       
       {/* Top Left Container: Burger + Account + Title + Toolbox */}
       <div className="absolute top-2 left-2 sm:top-4 sm:left-4 flex items-center gap-1.5 sm:gap-3 pointer-events-auto z-[3000] max-w-[calc(100vw-5rem)]">
@@ -110,9 +116,9 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                     onClick={() => setIsToolboxOpen(!isToolboxOpen)}
                     className="flex items-center gap-2 px-3 h-10 text-gray-700 hover:text-blue-600 transition-colors"
                 >
-                    <Wrench size={18} />
+                    <Wrench size={18} className="text-blue-600 font-bold" />
                     <span className="text-xs font-bold text-gray-700">Toolbox</span>
-                    <ChevronRight size={16} className={clsx("transition-transform duration-300", isToolboxOpen ? "rotate-180" : "")} />
+                    <ChevronRight size={16} className={clsx("transition-transform duration-300 text-blue-600", isToolboxOpen ? "rotate-180" : "")} />
                 </button>
 
                 <div className={clsx(
@@ -121,30 +127,6 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                 )}>
                     <div className="w-px h-5 bg-gray-300 mx-1 flex-shrink-0"></div>
           <button
-            onClick={() => setActiveTool(activeTool === 'measure' ? null : 'measure')}
-            className={clsx(
-              "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              activeTool === 'measure' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
-            )}
-            title="Measure Distance/Area"
-          >
-            <Ruler size={18} />
-            <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Measure</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTool(activeTool === 'extract' ? null : 'extract')}
-            className={clsx(
-              "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              activeTool === 'extract' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
-            )}
-            title="Extraction Layer (Draw)"
-          >
-            <PenTool size={18} />
-            <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Extract Features</span>
-          </button>
-
-          <button
             onClick={() => setActiveTool(activeTool === 'identify' ? null : 'identify')}
             className={clsx(
               "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
@@ -152,7 +134,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
             )}
             title="Identify Features"
           >
-            <MousePointer2 size={18} />
+            <MousePointer2 size={18} className={activeTool === 'identify' ? 'text-blue-700' : 'text-blue-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Identify</span>
           </button>
 
@@ -166,7 +148,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
             )}
             title="Measure Area (Polygon)"
           >
-            <Hexagon size={18} />
+            <Hexagon size={18} className={activeTool === 'polygon-measure' ? 'text-blue-700' : 'text-pink-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Measure Area</span>
           </button>
 
@@ -178,44 +160,44 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
             )}
             title="Buffer Analysis"
           >
-            <Circle size={18} />
+            <Circle size={18} className={activeTool === 'buffer' ? 'text-blue-700' : 'text-purple-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Buffer</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTool(activeTool === 'coordinate' ? null : 'coordinate')}
-            className={clsx(
-              "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              activeTool === 'coordinate' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
-            )}
-            title="Coordinate Converter"
-          >
-            <Crosshair size={18} />
-            <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Coords</span>
           </button>
 
           <div className="w-px h-5 bg-gray-300 mx-1"></div>
 
           <button
-            onClick={() => setIsTableOpen(!isTableOpen)}
+            onClick={() => onOpenLayerSelect ? onOpenLayerSelect() : setIsTableOpen(!isTableOpen)}
             className={clsx(
               "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
               isTableOpen ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
             )}
-            title="Attribute Table"
+            title="Attribute Table (Select Layer)"
           >
-            <Table size={18} />
+            <Table size={18} className={isTableOpen ? 'text-blue-700' : 'text-emerald-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Attribute Table</span>
           </button>
 
           <div className="w-px h-5 bg-gray-300 mx-1"></div>
 
           <button
+            onClick={() => setActiveTool('upload')}
+            className={clsx(
+              "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
+              activeTool === 'upload' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
+            )}
+            title="Upload Data (GeoJSON, KML, CSV)"
+          >
+            <Upload size={18} className={activeTool === 'upload' ? 'text-blue-700' : 'text-blue-500'} />
+            <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Upload Data</span>
+          </button>
+
+          <button
             onClick={() => setActiveTool('download')}
             className="p-1.5 rounded-lg text-gray-600 hover:bg-white hover:text-green-600 hover:shadow-sm transition-colors flex items-center justify-center group relative"
             title="Export Data"
           >
-            <Download size={18} />
+            <Download size={18} className="text-green-500" />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Export Data</span>
           </button>
 
@@ -224,7 +206,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
             className="p-1.5 rounded-lg text-gray-600 hover:bg-white hover:text-red-500 hover:shadow-sm transition-colors flex items-center justify-center group relative"
             title="Clear Analysis"
           >
-            <Trash2 size={18} />
+            <Trash2 size={18} className="text-red-500" />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Clear All</span>
           </button>
         </div>
@@ -232,9 +214,36 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
     </div>
       </div>
 
-      {/* Top Right: Basemap Switcher & Viewer Toggle */}
+      {/* Top Right: Theme Toggle + Basemap Switcher + Viewer Toggle */}
       <div className="absolute top-4 right-4 pointer-events-auto z-[2000] flex items-center gap-2">
-        
+
+        {/* Theme Toggle Button */}
+        <button
+          onClick={toggleTheme}
+          title={isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
+          className={clsx(
+            "relative h-10 w-[72px] rounded-xl border shadow-sm backdrop-blur-md transition-all duration-300 flex items-center px-1",
+            isDark
+              ? "bg-slate-800/90 border-slate-600/50 hover:bg-slate-700/90"
+              : "bg-white/70 border-gray-200/50 hover:bg-white hover:shadow-md"
+          )}
+        >
+          {/* Track icons */}
+          <Sun size={14} className={clsx("absolute left-2 transition-all duration-300", isDark ? "text-slate-500 opacity-60" : "text-amber-500")} />
+          <Moon size={14} className={clsx("absolute right-2 transition-all duration-300", isDark ? "text-indigo-400" : "text-gray-300 opacity-60")} />
+          {/* Pill thumb */}
+          <div className={clsx(
+            "w-6 h-7 rounded-lg shadow-md transform transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] flex items-center justify-center",
+            isDark
+              ? "translate-x-[36px] bg-indigo-600"
+              : "translate-x-0 bg-white border border-gray-200"
+          )}>
+            {isDark
+              ? <Moon size={13} className="text-white" />
+              : <Sun size={13} className="text-amber-500" />}
+          </div>
+        </button>
+
         {/* Viewer Toggle Button */}
         <button 
           onClick={() => setIsViewerOpen(!isViewerOpen)}
@@ -329,13 +338,13 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm transition-opacity duration-300 pointer-events-auto z-[6000] opacity-100"
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm transition-opacity duration-300 pointer-events-auto z-[9998] opacity-100"
             onClick={() => setIsDrawerOpen(false)}
           />
 
           {/* Drawer Panel */}
           <div 
-            className="fixed top-0 left-0 h-full w-80 bg-white shadow-2xl transform transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] z-[6001] pointer-events-auto flex flex-col translate-x-0"
+            className="fixed top-0 left-0 h-full w-80 bg-white shadow-2xl transform transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] z-[9999] pointer-events-auto flex flex-col translate-x-0"
           >
           {/* Drawer Header */}
           <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
@@ -358,7 +367,11 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
             {/* Menu Items */}
             <div className="space-y-1">
               <MenuLink icon={LayoutDashboard} label="Dashboard" active />
-              <MenuLink icon={User} label="My Account" />
+              <MenuLink
+                icon={User}
+                label="My Account"
+                onClick={() => { setIsDrawerOpen(false); onOpenAccount && onOpenAccount(); }}
+              />
               <MenuLink icon={HelpCircle} label="Help & Support" />
             </div>
 

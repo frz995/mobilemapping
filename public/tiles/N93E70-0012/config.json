@@ -1,6 +1,13 @@
 {
-    "type": "equirectangular",
-    "panorama": "/MMS_PIC/N93E70-0012.jpg",
+    "type": "multires",
+    "multiRes": {
+        "path": "%l/%y_%x",
+        "fallbackPath": "fallback/%s",
+        "extension": "jpg",
+        "tileResolution": 512,
+        "maxLevel": 1,
+        "cubeResolution": 2048
+    },
     "autoLoad": true,
     "showZoomCtrl": true,
     "showFullscreenCtrl": true,
