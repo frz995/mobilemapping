@@ -26,7 +26,7 @@ def generate_tiles(image_path, output_dir, tile_size=512):
             "extension": "jpg",
             "tileResolution": tile_size,
             "maxLevel": max_level,
-            "cubeResolution": width / 4 # Approximate
+            "cubeResolution": int(width / 4)
         }
     }
 
@@ -34,14 +34,14 @@ def generate_tiles(image_path, output_dir, tile_size=512):
     print(f"Original size: {width}x{height}")
     print(f"Max level: {max_level}")
 
-    # Create fallback image (small version)
+    # Create fallback image (small preview version for instant display)
     fallback_dir = os.path.join(output_dir, "fallback")
     if not os.path.exists(fallback_dir):
         os.makedirs(fallback_dir)
     
     fallback_img = img.copy()
-    fallback_img.thumbnail((1024, 512)) # Reasonable fallback size
-    fallback_img.save(os.path.join(fallback_dir, "f.jpg"), quality=85)
+    fallback_img.thumbnail((1024, 512)) # Instant preview fallback size
+    fallback_img.save(os.path.join(fallback_dir, "f.jpg"), quality=80, progressive=True)
     
     # Process each level
     current_img = img
@@ -58,24 +58,19 @@ def generate_tiles(image_path, output_dir, tile_size=512):
         
         for y in range(rows):
             for x in range(cols):
-                # Calculate tile box
                 left = x * tile_size
                 upper = y * tile_size
                 right = min(left + tile_size, current_width)
                 lower = min(upper + tile_size, current_height)
                 
                 tile = current_img.crop((left, upper, right, lower))
-                
-                # If tile is partial (right/bottom edge), pad it? 
-                # Pannellum handles partial tiles, but usually expects full squares.
-                # Let's just save as is.
                 tile_path = os.path.join(level_dir, f"{y}_{x}.jpg")
-                tile.save(tile_path, quality=85)
+                tile.save(tile_path, quality=82, progressive=True)
         
         # Downscale for next level
         if level > 1:
-            new_width = current_width // 2
-            new_height = current_height // 2
+            new_width = max(1, current_width // 2)
+            new_height = max(1, current_height // 2)
             current_img = current_img.resize((new_width, new_height), Image.LANCZOS)
 
     # Save config.json

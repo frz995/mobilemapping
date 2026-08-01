@@ -1,0 +1,10 @@
+Important!
+
+1.pip install psycopg2-binary supabase
+
+2. run this first in supabase SQL editor before the script
+
+-- Ensure filename is unique so the script can perform UPSERTs without duplicates
+3. ALTER TABLE public.panoramas ADD CONSTRAINT unique_filename UNIQUE (filename);
+
+4. run python Sync_to_Supabase.py

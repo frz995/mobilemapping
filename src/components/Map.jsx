@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, CircleMarker, useMap, useMapEvents, Rectangle, WMSTileLayer, GeoJSON } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, Map as MapIcon, Layers, Copy, Check } from 'lucide-react';
+import { Search, Map as MapIcon, Layers, Copy, Check, X } from 'lucide-react';
 import * as turf from '@turf/turf';
 import proj4 from 'proj4';
 
@@ -655,6 +655,15 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
       a.download = `map_data_${new Date().toISOString().slice(0,10)}.geojson`;
       a.click();
       setActiveTool(null);
+    } else if (activeTool === 'clear') {
+      setMeasurements([]);
+      setCurrentMeasurement([]);
+      setPolygonMeasurements([]);
+      setCurrentPolygon([]);
+      setBuffers([]);
+      setExtractedFeatures([]);
+      setCoordinateInfo(null);
+      setActiveTool(null);
     }
   }, [activeTool, setActiveTool, extractedFeatures, measurements, polygonMeasurements, buffers]);
 
@@ -741,6 +750,27 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
       <MapZoomHandler trigger={zoomToTrackTrigger} filteredPoints={filteredPoints} />
       <MapResizer resizeTrigger={resizeTrigger} />
       
+      {/* Active Tool Guidance Helper Banner */}
+      {activeTool && !['download', 'clear'].includes(activeTool) && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-[3000] bg-slate-900/90 backdrop-blur-md border border-slate-700/80 text-white text-xs px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+          <span className="font-semibold text-blue-400">
+            {activeTool === 'measure' && '📐 Distance Tool: Click map to add points. Double-click to finish line.'}
+            {activeTool === 'polygon-measure' && '⬡ Area Tool: Click map to draw polygon points. Double-click to calculate area.'}
+            {activeTool === 'extract' && '🖋️ Feature Extractor: Click on map to place digitized point features.'}
+            {activeTool === 'identify' && '📍 Identify Tool: Click any map feature or location to view GIS details.'}
+            {activeTool === 'buffer' && '⃝ Buffer Analysis: Click on map to enter radius and generate buffer zone.'}
+            {activeTool === 'coordinate' && '🎯 Coords Converter: Click on map to convert location to DD / DMS / UTM.'}
+          </span>
+          <button 
+            onClick={() => setActiveTool(null)}
+            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-red-400 rounded-lg transition-colors"
+            title="Cancel Tool"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <SearchBar isViewerOpen={isViewerOpen} />
       <BaseLayerRenderer activeBasemap={activeBasemap} />
       <MiniMap />

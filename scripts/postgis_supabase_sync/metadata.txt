@@ -1,0 +1,12 @@
+[general]
+name=PostGIS Supabase Sync
+qgisMinimumVersion=3.0
+description=Synchronizes local PostGIS layers to Supabase
+version=1.0
+author=Your Name
+email=your.email@example.com
+about=Performs two-phase sync between local PostGIS layers and remote Supabase tables.
+tracker=https://github.com
+repository=https://github.com
+category=Vector
+tags=postgis,supabase,sync

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight } from 'lucide-react';
+import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight, LogOut } from 'lucide-react';
 import clsx from 'clsx';
 import { BASEMAPS } from '../config/basemaps';
 
@@ -10,7 +10,7 @@ const MenuLink = ({ icon: Icon, label, active }) => (
   </button>
 );
 
-const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, isViewerOpen, setIsViewerOpen }) => {
+const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, isViewerOpen, setIsViewerOpen, user, signOut }) => {
   const layers = [
     { name: 'panotrack', title: 'Panotrack (360 Views)' }
   ];
@@ -18,6 +18,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isBasemapOpen, setIsBasemapOpen] = useState(false);
   const [isToolboxOpen, setIsToolboxOpen] = useState(false);
+  const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(null);
 
   const toggleLayer = (layerName) => {
@@ -31,23 +32,70 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
   return (
     <div className="fixed inset-0 pointer-events-none z-[5000]">
       
-      {/* Top Left Container: Burger + Title */}
-      <div className="absolute top-4 left-4 flex items-center gap-3 pointer-events-auto">
+      {/* Top Left Container: Burger + Account + Title + Toolbox */}
+      <div className="absolute top-4 left-4 flex items-center gap-3 pointer-events-auto z-[3000]">
         {/* Burger Menu Button */}
         <button 
           onClick={() => setIsDrawerOpen(true)}
-          className="bg-white/70 backdrop-blur-md p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-10 w-10 flex items-center justify-center"
+          className="bg-white/70 backdrop-blur-md p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-10 w-10 flex items-center justify-center shrink-0"
         >
           <Menu size={20} />
         </button>
 
+        {/* Account Widget - Fixed Pill Trigger + Floating Dropdown Panel */}
+        {user && (
+          <div className="relative shrink-0">
+            {/* Account Avatar Pill Button */}
+            <button
+              type="button"
+              title="User Account"
+              onClick={() => setIsUserToastExpanded(prev => !prev)}
+              className="bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center px-2.5 h-10 gap-2 hover:bg-white hover:shadow-md transition-all duration-300"
+            >
+              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                {user.email?.[0]?.toUpperCase() ?? 'U'}
+              </div>
+              <span className="text-xs font-bold text-gray-700 max-w-[120px] truncate hidden sm:inline">
+                {user.email?.split('@')[0]}
+              </span>
+              <ChevronDown size={14} className={clsx("text-gray-500 transition-transform duration-300", isUserToastExpanded && "rotate-180")} />
+            </button>
+
+            {/* Floating Account Dropdown Panel */}
+            {isUserToastExpanded && (
+              <div className="absolute left-0 top-12 w-64 bg-white/95 backdrop-blur-md border border-gray-200/80 rounded-2xl shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
+                  <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold shadow-md">
+                    {user.email?.[0]?.toUpperCase() ?? 'U'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-bold text-gray-800">{user.email}</p>
+                    <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-600 uppercase tracking-wider mt-0.5">Active Account</span>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    onClick={signOut}
+                    title="Sign Out"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 hover:bg-red-50 hover:border-red-200 hover:text-red-600 px-3 py-2 text-xs font-semibold text-gray-700 transition-all shadow-sm group"
+                  >
+                    <LogOut size={14} className="group-hover:text-red-600 transition-colors" />
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Map Title Card */}
-        <div className="bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center p-1.5 gap-3 min-w-[260px] pr-4 h-10 transition-all duration-300">
+        <div className="bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center p-1.5 gap-3 min-w-[220px] pr-4 h-10 transition-all duration-300">
           <div className="w-7 h-7 bg-transparent rounded-lg flex items-center justify-center shrink-0">
             <MapIcon className="text-blue-600" size={18} />
           </div>
           <div className="flex flex-col justify-center h-full">
-            <h1 className="text-sm font-extrabold text-gray-800 tracking-tight leading-none font-display">360° Web Mapping</h1>
+            <h1 className="text-xs font-extrabold text-gray-800 tracking-tight leading-none font-display">360° Web Mapping</h1>
             <span className="text-[8px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">StreetView Imagery</span>
           </div>
         </div>

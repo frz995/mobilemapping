@@ -7,7 +7,8 @@ import useCsvPoints from '../hooks/useCsvPoints';
 import useWfsPoints from '../hooks/useWfsPoints';
 import useAuth from '../hooks/useAuth';
 import { useSupabasePoints } from '../hooks/useSupabasePoints';
-import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera, LogOut } from 'lucide-react';
+import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera, LogOut, FileText } from 'lucide-react';
+import { generatePdfInspectionReport } from '../services/pdfReportService';
 import * as turf from '@turf/turf';
 
 const EMPTY_HOTSPOTS = [];
@@ -23,6 +24,7 @@ const Layout = () => {
   const [activeLayers, setActiveLayers] = useState(['panotrack']);
   const [activeBasemap, setActiveBasemap] = useState('osm');
   const [isViewerOpen, setIsViewerOpen] = useState(true);
+  const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
 
   const viewerRef = useRef(null);
 
@@ -108,7 +110,13 @@ const Layout = () => {
   }, [isPlaying, filteredPoints, playbackSpeed]);
 
   const handleNextFrame = React.useCallback(() => {
-    if (!selectedPoint || filteredPoints.length === 0) return;
+    if (filteredPoints.length === 0) return;
+    if (!selectedPoint) {
+      const firstPoint = filteredPoints[0];
+      setSelectedPoint(firstPoint);
+      setViewState(v => ({ ...v, yaw: firstPoint.bearing }));
+      return;
+    }
     const currentIndex = filteredPoints.findIndex(p => p.id === selectedPoint.id);
     if (currentIndex < filteredPoints.length - 1) {
       const nextPoint = filteredPoints[currentIndex + 1];
@@ -118,7 +126,13 @@ const Layout = () => {
   }, [selectedPoint, filteredPoints]);
 
   const handlePrevFrame = React.useCallback(() => {
-    if (!selectedPoint || filteredPoints.length === 0) return;
+    if (filteredPoints.length === 0) return;
+    if (!selectedPoint) {
+      const firstPoint = filteredPoints[0];
+      setSelectedPoint(firstPoint);
+      setViewState(v => ({ ...v, yaw: firstPoint.bearing }));
+      return;
+    }
     const currentIndex = filteredPoints.findIndex(p => p.id === selectedPoint.id);
     if (currentIndex > 0) {
       const prevPoint = filteredPoints[currentIndex - 1];
@@ -145,6 +159,23 @@ const Layout = () => {
       link.click();
       document.body.removeChild(link);
     }
+  }, [selectedPoint]);
+
+  const handlePdfReport = React.useCallback(async () => {
+    if (!selectedPoint) return;
+    let snapshotUrl = null;
+    if (viewerRef.current) {
+      snapshotUrl = await viewerRef.current.captureSnapshot({
+        id: selectedPoint.id,
+        date: selectedPoint.captured_at,
+        lat: selectedPoint.lat,
+        lon: selectedPoint.lon
+      });
+    }
+    await generatePdfInspectionReport({
+      point: selectedPoint,
+      snapshotDataUrl: snapshotUrl
+    });
   }, [selectedPoint]);
 
   // Extract unique subgrids for filter dropdown
@@ -281,7 +312,7 @@ const Layout = () => {
     document.body.style.cursor = 'col-resize';
   };
 
-  // Preload next/prev images for smoother playback
+  // Preload next/prev images and tile configs for smoother Street View style jumps
   useEffect(() => {
     if (!selectedPoint || !filteredPoints.length) return;
 
@@ -289,19 +320,33 @@ const Layout = () => {
     if (currentIndex === -1) return;
 
     const pointsToPreload = [];
-    // Preload next 2 images
+    // Preload next 2 points and previous 1 point
     if (currentIndex + 1 < filteredPoints.length) pointsToPreload.push(filteredPoints[currentIndex + 1]);
     if (currentIndex + 2 < filteredPoints.length) pointsToPreload.push(filteredPoints[currentIndex + 2]);
-    // Preload previous image
     if (currentIndex - 1 >= 0) pointsToPreload.push(filteredPoints[currentIndex - 1]);
 
     pointsToPreload.forEach(point => {
+      // 1. Preload config JSON if tile configUrl is present
+      if (point.config_url) {
+        fetch(point.config_url)
+          .then(res => res.ok ? res.json() : null)
+          .then(config => {
+            if (config && config.multiRes && config.multiRes.fallbackPath) {
+              const basePath = point.config_url.substring(0, point.config_url.lastIndexOf('/') + 1);
+              const fallbackFile = config.multiRes.fallbackPath.replace('%s', 'f');
+              const fallbackUrl = `${basePath}${fallbackFile}`;
+              const img = new Image();
+              img.src = fallbackUrl;
+            }
+          })
+          .catch(() => {});
+      }
+
+      // 2. Preload direct image_url
       if (point.image_url) {
         let url = point.image_url;
-        // Match Viewer.jsx logic for CDN
         if (!url.startsWith('http')) {
           const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || '/';
-          // Only prepend if not already present
           const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
           if (!url.startsWith(cleanBase)) {
             url = `${cleanBase}${url.startsWith('/') ? url.substring(1) : url}`;
@@ -341,30 +386,9 @@ const Layout = () => {
         setIsTableOpen={setIsTableOpen}
         isViewerOpen={isViewerOpen}
         setIsViewerOpen={setIsViewerOpen}
+        user={user}
+        signOut={signOut}
       />
-
-      {/* User info + Logout button — top-right floating badge */}
-      {user && (
-        <div className="absolute top-3 right-4 z-50 flex items-center gap-2">
-          <div className="flex items-center gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/50 rounded-xl px-3 py-1.5 shadow-lg">
-            <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
-              {user.email?.[0]?.toUpperCase() ?? 'U'}
-            </div>
-            <span className="text-gray-300 text-xs max-w-[140px] truncate">{user.email}</span>
-          </div>
-          <button
-            id="logout-btn"
-            onClick={signOut}
-            title="Sign Out"
-            className="flex items-center gap-1.5 bg-gray-900/80 backdrop-blur-md border border-gray-700/50
-                       hover:bg-red-600/80 hover:border-red-500/50 text-gray-300 hover:text-white
-                       rounded-xl px-3 py-1.5 text-xs font-medium transition-all duration-200 shadow-lg"
-          >
-            <LogOut size={14} />
-            Sign Out
-          </button>
-        </div>
-      )}
 
       {/* Main Content Area */}
       <div
@@ -434,71 +458,19 @@ const Layout = () => {
             style={{ width: `${100 - splitRatio}%` }}
           >
             {selectedPoint ? (
-              <>
-                <Viewer
-                  // key={selectedPoint.id} // REMOVED: Prevent remounting to avoid WebGL context churn
-                  ref={viewerRef}
-                  image={selectedPoint.image_url}
-                  configUrl={selectedPoint.config_url}
-                  initialYaw={selectedPoint.bearing}
-                  initialPitch={0}
-                  initialHfov={100}
-                  onViewChange={handleViewChange}
-                  navTargets={navTargets}
-                  onNavigate={handlePointSelect}
-                  hotSpots={pathHotspots}
-                />
-                {/* Playback Controls Overlay */}
-                <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-white/80 backdrop-blur-xl rounded-2xl p-2 flex items-center gap-2 shadow-2xl border border-white/50 z-20 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1">
-                  <button
-                    onClick={handlePrevFrame}
-                    className="p-2.5 hover:bg-gray-100 text-gray-500 hover:text-blue-600 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed group"
-                    disabled={!selectedPoint || filteredPoints.indexOf(selectedPoint) <= 0}
-                    title="Previous Frame"
-                  >
-                    <SkipBack size={20} className="group-hover:-translate-x-0.5 transition-transform" />
-                  </button>
-
-                  <button
-                    onClick={() => setIsPlaying(!isPlaying)}
-                    className={`p-3 rounded-xl transition-all shadow-sm transform active:scale-95 flex items-center justify-center ${isPlaying
-                      ? 'bg-red-50 text-red-500 hover:bg-red-100 ring-1 ring-red-200'
-                      : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-blue-600'
-                      }`}
-                    title={isPlaying ? "Pause" : "Play Walkthrough"}
-                  >
-                    {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
-                  </button>
-
-                  <button
-                    onClick={handleNextFrame}
-                    className="p-2.5 hover:bg-gray-100 text-gray-500 hover:text-blue-600 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed group"
-                    disabled={!selectedPoint || filteredPoints.indexOf(selectedPoint) >= filteredPoints.length - 1}
-                    title="Next Frame"
-                  >
-                    <SkipForward size={20} className="group-hover:translate-x-0.5 transition-transform" />
-                  </button>
-
-                  <div className="w-px h-8 bg-gray-200 mx-1"></div>
-
-                  <div className="flex flex-col items-center px-2 min-w-[60px]">
-                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Frame</span>
-                    <div className="text-sm font-bold text-gray-700 font-mono leading-none">
-                      {filteredPoints.indexOf(selectedPoint) + 1}<span className="text-gray-300 font-normal mx-1">/</span>{filteredPoints.length}
-                    </div>
-                  </div>
-
-                  <div className="w-px h-8 bg-gray-200 mx-1"></div>
-
-                  <button
-                    onClick={handleSnapshot}
-                    className="p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-xl transition-all group"
-                    title="Take Snapshot (Save Image)"
-                  >
-                    <Camera size={20} className="group-hover:scale-110 transition-transform" />
-                  </button>
-                </div>
-              </>
+              <Viewer
+                // key={selectedPoint.id} // REMOVED: Prevent remounting to avoid WebGL context churn
+                ref={viewerRef}
+                image={selectedPoint.image_url}
+                configUrl={selectedPoint.config_url}
+                initialYaw={selectedPoint.bearing}
+                initialPitch={0}
+                initialHfov={100}
+                onViewChange={handleViewChange}
+                navTargets={navTargets}
+                onNavigate={handlePointSelect}
+                hotSpots={pathHotspots}
+              />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-gray-500 bg-gray-900 select-none">
                 <Maximize2 size={64} className="mb-4 opacity-30" />
@@ -506,6 +478,72 @@ const Layout = () => {
                 <p className="text-sm opacity-50 mt-2">to view 360° imagery</p>
               </div>
             )}
+
+            {/* Playback Controls Overlay - ALWAYS VISIBLE */}
+            <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-white/80 backdrop-blur-xl rounded-2xl p-2 flex items-center gap-2 shadow-2xl border border-white/50 z-50 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1">
+              <button
+                onClick={handlePrevFrame}
+                className="p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group"
+                disabled={selectedPoint && filteredPoints.indexOf(selectedPoint) <= 0}
+                title="Previous Frame"
+              >
+                <SkipBack size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+              </button>
+
+              <button
+                onClick={() => {
+                  if (!selectedPoint && filteredPoints.length > 0) {
+                    handlePointSelect(filteredPoints[0]);
+                  }
+                  setIsPlaying(!isPlaying);
+                }}
+                className={`p-3 rounded-xl transition-all shadow-sm transform active:scale-95 flex items-center justify-center ${isPlaying
+                  ? 'bg-red-50 text-red-500 hover:bg-red-100 ring-1 ring-red-200'
+                  : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-blue-600'
+                  }`}
+                title={isPlaying ? "Pause" : "Play Walkthrough"}
+              >
+                {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
+              </button>
+
+              <button
+                onClick={handleNextFrame}
+                className="p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group"
+                disabled={selectedPoint && filteredPoints.indexOf(selectedPoint) >= filteredPoints.length - 1}
+                title="Next Frame"
+              >
+                <SkipForward size={20} className="group-hover:translate-x-0.5 transition-transform" />
+              </button>
+
+              <div className="w-px h-8 bg-gray-200 mx-1"></div>
+
+              <div className="flex flex-col items-center px-2 min-w-[60px]">
+                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Frame</span>
+                <div className="text-sm font-bold text-gray-700 font-mono leading-none">
+                  {selectedPoint ? filteredPoints.indexOf(selectedPoint) + 1 : 0}<span className="text-gray-300 font-normal mx-1">/</span>{filteredPoints.length}
+                </div>
+              </div>
+
+              <div className="w-px h-8 bg-gray-200 mx-1"></div>
+
+              <button
+                onClick={handleSnapshot}
+                className="p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-xl transition-all group disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!selectedPoint}
+                title="Take Snapshot (Save Image)"
+              >
+                <Camera size={20} className="group-hover:scale-110 transition-transform" />
+              </button>
+
+              <button
+                onClick={handlePdfReport}
+                className="p-2.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-xl transition-all group disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!selectedPoint}
+                title="Generate PDF Survey Inspection Report"
+              >
+                <FileText size={20} className="group-hover:scale-110 transition-transform" />
+              </button>
+            </div>
           </div>
         )}
 
