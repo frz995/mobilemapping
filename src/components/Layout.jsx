@@ -18,7 +18,7 @@ import * as turf from '@turf/turf';
 
 const EMPTY_HOTSPOTS = [];
 
-const Layout = () => {
+const Layout = ({ isEmbed = false }) => {
   const { user, signOut } = useAuth();
   const {
     stats: usageStats,
@@ -406,6 +406,7 @@ const Layout = () => {
 
       {/* Sidebar - Fixed overlay */}
       <Sidebar
+        isEmbed={isEmbed}
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
         qgisWmsUrl={qgisWmsUrl}

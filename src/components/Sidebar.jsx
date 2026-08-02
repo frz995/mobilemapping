@@ -15,7 +15,11 @@ const MenuLink = ({ icon: Icon, label, active, onClick }) => (
   </button>
 );
 
-const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut }) => {
+const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut }) => {
+  if (isEmbed) {
+    return null;
+  }
+
   const layers = [
     { name: 'panotrack', title: 'Panotrack (360 Views)' }
   ];

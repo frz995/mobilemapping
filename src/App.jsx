@@ -6,9 +6,14 @@ import useAuth from './hooks/useAuth';
 
 function App() {
   const { user, loading } = useAuth();
+  const isEmbed = typeof window !== 'undefined' && (
+    new URLSearchParams(window.location.search).get('embed') === 'true' ||
+    new URLSearchParams(window.location.search).get('clean') === 'true' ||
+    new URLSearchParams(window.location.search).get('ui') === 'false'
+  );
 
-  // Show blank screen while checking auth session
-  if (loading) {
+  // Show blank screen while checking auth session (unless in embed mode)
+  if (loading && !isEmbed) {
     return (
       <div className="h-screen w-screen bg-gray-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -22,16 +27,16 @@ function App() {
     );
   }
 
-  // Show login page if not authenticated
-  if (!user) {
+  // Show login page if not authenticated (unless in embed mode)
+  if (!user && !isEmbed) {
     return <LoginPage />;
   }
 
-  // Show the map if authenticated
+  // Show the map if authenticated or in embed mode
   return (
     <ErrorBoundary>
       <div className="h-screen w-screen bg-gray-900 text-white overflow-hidden">
-        <Layout />
+        <Layout isEmbed={isEmbed} />
       </div>
     </ErrorBoundary>
   );
