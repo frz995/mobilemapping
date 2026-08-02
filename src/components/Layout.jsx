@@ -49,7 +49,7 @@ const Layout = ({ isEmbed = false }) => {
   const [splitRatio, setSplitRatio] = useState(50); // 50% split
   const [activeLayers, setActiveLayers] = useState(['panotrack']);
   const [activeBasemap, setActiveBasemap] = useState('positron');
-  const [isViewerOpen, setIsViewerOpen] = useState(true);
+  const [isViewerOpen, setIsViewerOpen] = useState(!isEmbed);
   const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
@@ -471,6 +471,7 @@ const Layout = ({ isEmbed = false }) => {
           )}
           <div className="flex-1 relative min-h-0">
             <MapComponent
+              isEmbed={isEmbed}
               points={activeLayers.includes('panotrack') ? points : []}
               filteredPoints={filteredPoints}
               selectedPoint={selectedPoint}

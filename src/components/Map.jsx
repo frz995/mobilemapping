@@ -648,7 +648,7 @@ const BaseLayerRenderer = ({ activeBasemap }) => {
   );
 };
 
-const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, viewState, qgisWmsUrl, activeLayers, activeBasemap, activeTool, setActiveTool, filterSubgrid, filterDate, filterColorByDate, filterDateStrict, zoomToTrackTrigger, resizeTrigger, isViewerOpen, isDrawingExportBBox, onBoundaryDrawn }) => {
+const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, onPointSelect, viewState, qgisWmsUrl, activeLayers, activeBasemap, activeTool, setActiveTool, filterSubgrid, filterDate, filterColorByDate, filterDateStrict, zoomToTrackTrigger, resizeTrigger, isViewerOpen, isDrawingExportBBox, onBoundaryDrawn }) => {
   const [measurements, setMeasurements] = useState([]); // Array of polylines
   const [currentMeasurement, setCurrentMeasurement] = useState([]); // Points of current measurement
   const [extractedFeatures, setExtractedFeatures] = useState([]); // Array of markers {id, lat, lng, type}
@@ -797,9 +797,9 @@ const MapComponent = ({ points, filteredPoints, selectedPoint, onPointSelect, vi
         </div>
       )}
 
-      <SearchBar isViewerOpen={isViewerOpen} />
+      {!isEmbed && <SearchBar isViewerOpen={isViewerOpen} />}
       <BaseLayerRenderer activeBasemap={activeBasemap} />
-      <MiniMap />
+      {!isEmbed && <MiniMap />}
       <CoordinateDisplay />
 
       {qgisWmsUrl && activeLayers && activeLayers.map((name) => (
