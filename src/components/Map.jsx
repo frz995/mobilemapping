@@ -5,6 +5,8 @@ import 'leaflet/dist/leaflet.css';
 import { Search, Map as MapIcon, Layers, Copy, Check, X } from 'lucide-react';
 import * as turf from '@turf/turf';
 import proj4 from 'proj4';
+import { useTheme } from '../context/ThemeContext';
+import clsx from 'clsx';
 
 // Fix for default marker icon issues in React Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -310,14 +312,20 @@ const MapResizer = ({ resizeTrigger }) => {
 // --- Search Component ---
 const SearchBar = ({ isViewerOpen }) => {
   const map = useMap();
+  const { isDark } = useTheme();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const inputRef = useRef(null);
 
   // Calculate right margin based on viewer state.
-  // When viewer is closed (full-width map), reserve space for top-right buttons:
-  //   theme toggle (72px) + viewer toggle (40px) + basemap (40px) + gaps + padding ≈ 200px
-  // When viewer is open, the buttons sit on the far right of the full screen beyond the map edge.
   const rightMargin = !isViewerOpen ? '200px' : '10px';
+
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isOpen]);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -354,26 +362,68 @@ const SearchBar = ({ isViewerOpen }) => {
 
   return (
     <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', marginTop: '12px', marginRight: rightMargin, marginBottom: '10px', marginLeft: '10px', zIndex: 1000, transition: 'margin-right 0.3s ease' }}>
-      <form onSubmit={handleSearch} className="flex items-center bg-white/80 backdrop-blur-md rounded-xl shadow-md overflow-hidden border border-gray-200/50 w-36 sm:w-64">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search..."
-          className="flex-1 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-gray-700 bg-transparent focus:outline-none placeholder-gray-500 min-w-0"
-        />
-        <button 
-          type="submit" 
-          className="p-1.5 sm:p-2 bg-transparent text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center shrink-0"
-          disabled={loading}
-        >
-          {loading ? (
-            <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          ) : (
-            <Search size={15} />
+      <div className="relative flex items-center justify-end">
+        <form 
+          onSubmit={handleSearch} 
+          className={clsx(
+            "flex items-center backdrop-blur-md rounded-xl shadow-md border overflow-hidden transition-all duration-300 origin-right h-10",
+            isDark
+              ? "bg-slate-900/90 border-slate-700/70 text-slate-100 shadow-slate-950/50"
+              : "bg-white/80 border-gray-200/50 text-gray-800 shadow-sm",
+            isOpen ? "w-56 sm:w-72 px-1" : "w-10 px-0"
           )}
-        </button>
-      </form>
+        >
+          {isOpen && (
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search location or lat,lon..."
+              className={clsx(
+                "flex-1 px-3 py-2 text-xs sm:text-sm bg-transparent focus:outline-none min-w-0 transition-all",
+                isDark ? "text-slate-100 placeholder-slate-400" : "text-gray-700 placeholder-gray-400"
+              )}
+            />
+          )}
+
+          {isOpen && query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className={clsx("p-1.5 rounded-lg transition-colors shrink-0", isDark ? "text-slate-400 hover:text-slate-200" : "text-gray-400 hover:text-gray-600")}
+              title="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
+
+          <button 
+            type={isOpen && query.trim() ? "submit" : "button"} 
+            onClick={() => {
+              if (!isOpen) {
+                setIsOpen(true);
+              } else if (!query.trim()) {
+                setIsOpen(false);
+              }
+            }}
+            className={clsx(
+              "h-10 w-10 transition-colors flex items-center justify-center shrink-0 rounded-xl",
+              isDark
+                ? "text-blue-400 hover:text-blue-300 hover:bg-slate-800/80"
+                : "text-blue-600 hover:text-blue-800 hover:bg-slate-100/60"
+            )}
+            title={isOpen ? "Search" : "Open Search Bar"}
+            disabled={loading}
+          >
+            {loading ? (
+              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <Search size={18} />
+            )}
+          </button>
+        </form>
+      </div>
     </div>
   );
 };

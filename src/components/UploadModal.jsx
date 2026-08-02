@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { Upload, X, FileCheck, AlertCircle, Check, FileArchive, FileJson, MapPin } from 'lucide-react';
-import { useTheme } from '../context/ThemeContext';
+import { Upload, X, FileCheck, AlertCircle, Check, FileArchive, FileJson, Globe, SlidersHorizontal } from 'lucide-react';
 import shpjs from 'shpjs';
+import { useTheme } from '../context/ThemeContext';
+import clsx from 'clsx';
 
 const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
   const { isDark } = useTheme();
@@ -23,9 +24,9 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
 
   const getFileIcon = (name) => {
     const ext = name?.split('.').pop()?.toLowerCase();
-    if (ext === 'zip') return <FileArchive className="text-amber-500 mb-2" size={32} />;
-    if (ext === 'csv') return <FileCheck className="text-emerald-500 mb-2" size={32} />;
-    return <FileJson className="text-blue-500 mb-2" size={32} />;
+    if (ext === 'zip') return <FileArchive className="text-blue-600 mb-2" size={32} />;
+    if (ext === 'csv') return <FileCheck className="text-blue-600 mb-2" size={32} />;
+    return <FileJson className="text-blue-600 mb-2" size={32} />;
   };
 
   const validateAndSetFile = (selectedFile) => {
@@ -77,7 +78,6 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
       setUploadProgress('Parsing KML…');
       const parser = new DOMParser();
       const kmlDoc = parser.parseFromString(text, 'application/xml');
-      // Basic KML → GeoJSON: extract placemarks
       const placemarks = Array.from(kmlDoc.querySelectorAll('Placemark'));
       const features = placemarks.map(pm => {
         const name = pm.querySelector('name')?.textContent || '';
@@ -95,7 +95,7 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
 
     if (ext === 'csv') {
       setUploadProgress('Parsing CSV…');
-      return text; // raw text, consumer handles it
+      return text;
     }
 
     return text;
@@ -132,58 +132,48 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
     }
   };
 
-  // ── Theme classes ──
-  const modal = isDark ? 'bg-gray-900 border-gray-700/60 text-gray-100' : 'bg-white border-gray-200 text-gray-900';
-  const header = isDark ? 'border-gray-800 bg-gray-900/60' : 'border-gray-100 bg-gray-50/80';
-  const iconBg = isDark ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-50 text-blue-600';
-  const subText = isDark ? 'text-gray-400' : 'text-gray-500';
-  const closeBtn = isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100';
-  const dropIdle = isDark ? 'border-gray-700 hover:border-gray-500 bg-gray-800/40' : 'border-gray-300 hover:border-blue-400 bg-gray-50';
-  const dropFile = isDark ? 'border-green-500/50 bg-green-500/5' : 'border-green-400 bg-green-50/60';
-  const dropDrag = isDark ? 'border-blue-500 bg-blue-500/10 scale-[1.01]' : 'border-blue-500 bg-blue-50 scale-[1.01]';
-  const fileName = isDark ? 'text-white' : 'text-gray-800';
-  const label = isDark ? 'text-gray-300' : 'text-gray-600';
-  const select = isDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-800';
-  const checkLabel = isDark ? 'text-gray-200' : 'text-gray-700';
-  const divider = isDark ? 'border-gray-800' : 'border-gray-100';
-  const cancelBtn = isDark ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600';
-  const errorBox = isDark ? 'bg-red-950/60 border-red-800/60 text-red-400' : 'bg-red-50 border-red-200 text-red-600';
-
-  const fileTypeBadges = [
-    { label: 'GeoJSON', color: isDark ? 'bg-blue-900/40 text-blue-300 border-blue-800' : 'bg-blue-50 text-blue-600 border-blue-200' },
-    { label: 'KML', color: isDark ? 'bg-violet-900/40 text-violet-300 border-violet-800' : 'bg-violet-50 text-violet-600 border-violet-200' },
-    { label: 'CSV', color: isDark ? 'bg-emerald-900/40 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-600 border-emerald-200' },
-    { label: 'SHP .zip', color: isDark ? 'bg-amber-900/40 text-amber-300 border-amber-800' : 'bg-amber-50 text-amber-600 border-amber-200' },
-  ];
+  const fileTypeBadges = ['GeoJSON', 'KML', 'CSV', 'SHP .zip'];
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-      <div className={`${modal} border rounded-2xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200`}>
+    <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-md z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className={clsx(
+        "backdrop-blur-2xl border max-w-lg w-full p-6 space-y-5 relative overflow-hidden flex flex-col rounded-3xl transition-all duration-300",
+        isDark
+          ? "bg-slate-900/95 border-slate-800 text-slate-100 shadow-2xl shadow-slate-950/80"
+          : "bg-white/95 border-slate-200/90 text-slate-800 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.15)]"
+      )}>
+
+        {/* Top Decorative Subtle Ambient Gradient */}
+        <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-32 bg-blue-500/10 blur-3xl rounded-full pointer-events-none" />
 
         {/* Header */}
-        <div className={`flex justify-between items-center px-5 py-4 border-b ${header}`}>
-          <div className="flex items-center gap-2.5">
-            <div className={`h-9 w-9 rounded-xl ${iconBg} flex items-center justify-center`}>
-              <Upload size={18} />
+        <div className={clsx("flex items-center justify-between pb-4 border-b relative", isDark ? "border-slate-800" : "border-slate-100")}>
+          <div className="flex items-center gap-3">
+            <div className={clsx("p-2.5 border rounded-2xl shadow-sm", isDark ? "bg-blue-950/60 border-blue-800/60 text-blue-400" : "bg-blue-50 border-blue-100 text-blue-600")}>
+              <Upload size={22} />
             </div>
             <div>
-              <h3 className="font-bold text-sm leading-tight">Upload Spatial Data</h3>
-              <span className={`text-[10px] font-medium ${subText}`}>Max 50 MB · GeoJSON, KML, CSV, Shapefile</span>
+              <h3 className={clsx("font-extrabold text-base tracking-tight", isDark ? "text-slate-100" : "text-slate-800")}>Upload Spatial Data</h3>
+              <p className="text-[11px] font-semibold text-slate-400">Max {MAX_SIZE_MB} MB · GeoJSON, KML, CSV, Shapefile</p>
             </div>
           </div>
-          <button onClick={onClose} className={`${closeBtn} p-1.5 rounded-lg transition-colors`}>
+
+          <button
+            onClick={onClose}
+            className={clsx("p-2 rounded-2xl transition-all", isDark ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100")}
+          >
             <X size={18} />
           </button>
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
 
           {/* Supported format badges */}
           <div className="flex flex-wrap gap-1.5">
-            {fileTypeBadges.map(b => (
-              <span key={b.label} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${b.color}`}>
-                {b.label}
+            {fileTypeBadges.map(label => (
+              <span key={label} className={clsx("text-[10px] font-bold px-3 py-1 rounded-xl border", isDark ? "bg-blue-950/60 text-blue-400 border-blue-800/40" : "bg-blue-50/80 text-blue-600 border-blue-100")}>
+                {label}
               </span>
             ))}
           </div>
@@ -194,8 +184,16 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all duration-200 ${isDragging ? dropDrag : file ? dropFile : dropIdle
-              }`}
+            className={clsx(
+              "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all duration-200",
+              isDragging
+                ? isDark ? "border-blue-500 bg-blue-950/40 scale-[1.01]" : "border-blue-500 bg-blue-50/80 scale-[1.01]"
+                : file
+                ? isDark ? "border-blue-500/60 bg-blue-950/20 border-solid" : "border-blue-500/60 bg-blue-50/40 border-solid"
+                : isDark
+                ? "border-slate-700/80 hover:border-blue-500 bg-slate-800/40 hover:bg-slate-800/80"
+                : "border-slate-200/90 hover:border-blue-400 bg-slate-50/60 hover:bg-blue-50/20"
+            )}
           >
             <input
               ref={fileInputRef}
@@ -208,27 +206,27 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
             {file ? (
               <div className="flex flex-col items-center text-center">
                 {getFileIcon(file.name)}
-                <span className={`font-bold text-xs ${fileName} truncate max-w-[250px]`}>{file.name}</span>
-                <span className={`text-[10px] ${subText} mt-0.5`}>
+                <span className={clsx("font-bold text-xs truncate max-w-[260px]", isDark ? "text-slate-100" : "text-slate-800")}>{file.name}</span>
+                <span className="text-[10px] font-semibold text-slate-400 mt-0.5">
                   {(file.size / (1024 * 1024)).toFixed(2)} MB
                 </span>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setFile(null); setError(null); }}
-                  className={`mt-2 text-[10px] px-2 py-0.5 rounded-full border ${isDark ? 'border-gray-600 text-gray-400 hover:text-red-400 hover:border-red-600' : 'border-gray-300 text-gray-400 hover:text-red-500 hover:border-red-300'} transition-colors`}
+                  className={clsx("mt-2 text-[10px] font-bold px-2.5 py-0.5 rounded-full border transition-all", isDark ? "border-slate-700 text-slate-400 hover:text-red-400 hover:border-red-800 hover:bg-red-950/40" : "border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50")}
                 >
-                  Remove
+                  Remove File
                 </button>
               </div>
             ) : (
               <div className="flex flex-col items-center text-center">
-                <Upload className={`${subText} mb-2`} size={28} />
-                <span className={`text-xs font-semibold ${isDark ? 'text-gray-200' : 'text-gray-600'}`}>
-                  Drag & drop here, or <span className="text-blue-500 underline underline-offset-2">browse</span>
+                <Upload className={isDark ? "text-blue-400 mb-2" : "text-blue-500/80 mb-2"} size={28} />
+                <span className={clsx("text-xs font-bold", isDark ? "text-slate-200" : "text-slate-700")}>
+                  Drag & drop here, or <span className={isDark ? "text-blue-400 underline underline-offset-2" : "text-blue-600 underline underline-offset-2"}>browse</span>
                 </span>
-                <span className={`text-[10px] ${subText} mt-1`}>{SUPPORTED_LABEL} · Max {MAX_SIZE_MB} MB</span>
-                <div className={`mt-3 flex items-center gap-1.5 text-[10px] ${isDark ? 'text-amber-400' : 'text-amber-600'} bg-amber-500/10 border ${isDark ? 'border-amber-800/40' : 'border-amber-200'} px-3 py-1.5 rounded-lg`}>
-                  <FileArchive size={11} />
+                <span className="text-[10px] font-semibold text-slate-400 mt-1">{SUPPORTED_LABEL} · Max {MAX_SIZE_MB} MB</span>
+                <div className={clsx("mt-3 flex items-center gap-1.5 text-[10px] font-semibold px-3 py-1.5 rounded-xl border", isDark ? "text-blue-400 bg-blue-950/60 border-blue-800/40" : "text-blue-600 bg-blue-50/80 border-blue-100")}>
+                  <FileArchive size={12} className={isDark ? "text-blue-400" : "text-blue-600"} />
                   <span>Shapefile: upload as <strong>.zip</strong> (containing .shp + .dbf + .prj)</span>
                 </div>
               </div>
@@ -237,60 +235,71 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
 
           {/* Error */}
           {error && (
-            <div className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${errorBox}`}>
-              <AlertCircle size={15} className="shrink-0 mt-0.5" />
+            <div className={clsx("flex items-start gap-2 p-3 rounded-2xl border text-xs font-medium", isDark ? "bg-red-950/60 border-red-800 text-red-400" : "bg-red-50/80 border-red-200 text-red-600")}>
+              <AlertCircle size={15} className="shrink-0 mt-0.5 text-red-500" />
               <span>{error}</span>
             </div>
           )}
 
           {/* CRS Selector */}
-          <div>
-            <label className={`block text-xs font-semibold ${label} mb-1.5`}>
-              Coordinate System (CRS)
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase flex items-center gap-1.5">
+              <Globe size={12} className={isDark ? "text-blue-400" : "text-blue-600"} />
+              <span>Coordinate Reference System (CRS)</span>
             </label>
-            <select
-              value={crs}
-              onChange={(e) => setCrs(e.target.value)}
-              className={`w-full ${select} border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            >
-              <option value="EPSG:4326">EPSG:4326 — WGS 84 (Geographic)</option>
-              <option value="EPSG:3857">EPSG:3857 — Web Mercator</option>
-              <option value="EPSG:32647">EPSG:32647 — UTM Zone 47N</option>
-              <option value="EPSG:32648">EPSG:32648 — UTM Zone 48N</option>
-              <option value="EPSG:2062">EPSG:2062 — RSO Malaya</option>
-            </select>
+            <div className="relative">
+              <select
+                value={crs}
+                onChange={(e) => setCrs(e.target.value)}
+                className={clsx(
+                  "w-full rounded-2xl px-4 py-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer appearance-none shadow-sm transition-all border",
+                  isDark ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-slate-50/90 border-slate-200/90 text-slate-800"
+                )}
+              >
+                <option value="EPSG:4326">EPSG:4326 — WGS 84 (Geographic)</option>
+                <option value="EPSG:3857">EPSG:3857 — Web Mercator</option>
+                <option value="EPSG:32647">EPSG:32647 — UTM Zone 47N</option>
+                <option value="EPSG:32648">EPSG:32648 — UTM Zone 48N</option>
+                <option value="EPSG:2062">EPSG:2062 — RSO Malaya</option>
+              </select>
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                <SlidersHorizontal size={14} />
+              </div>
+            </div>
           </div>
 
-          {/* Add to Panorama */}
-          <label className="flex items-center gap-2.5 cursor-pointer select-none py-1 group">
+          {/* Add to Panorama Toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none py-1.5 group">
             <div
               onClick={() => setAddToPanorama(v => !v)}
-              className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-300 border shrink-0 ${addToPanorama
-                  ? 'bg-blue-600 border-blue-600'
-                  : isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-200 border-gray-300'
-                }`}
+              className={clsx(
+                "w-10 h-5 rounded-full p-0.5 transition-colors duration-300 border shrink-0",
+                addToPanorama
+                  ? "bg-blue-600 border-blue-600"
+                  : isDark ? "bg-slate-800 border-slate-700" : "bg-slate-200 border-slate-300"
+              )}
             >
-              <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${addToPanorama ? 'translate-x-4' : 'translate-x-0'}`} />
+              <div className={clsx("w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-300", addToPanorama ? "translate-x-5" : "translate-x-0")} />
             </div>
             <div>
-              <span className={`text-xs font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>Add to Panorama Viewer</span>
-              <p className={`text-[10px] ${subText}`}>Overlay features on the 360° map view</p>
+              <span className={clsx("text-xs font-bold", isDark ? "text-slate-200" : "text-slate-800")}>Add to Panorama Viewer</span>
+              <p className="text-[10px] font-semibold text-slate-400">Overlay features on the 360° map view</p>
             </div>
           </label>
 
-          {/* Buttons */}
-          <div className={`flex items-center gap-2 pt-2 border-t ${divider}`}>
+          {/* Footer Action Buttons */}
+          <div className={clsx("flex items-center justify-end gap-3 pt-3 border-t", isDark ? "border-slate-800" : "border-slate-100")}>
             <button
               type="button"
               onClick={onClose}
-              className={`flex-1 py-2.5 ${cancelBtn} text-xs font-semibold rounded-xl transition-colors`}
+              className={clsx("px-5 py-2.5 rounded-2xl font-semibold text-xs transition-all", isDark ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100")}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!file || isUploading}
-              className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-semibold rounded-xl text-white flex items-center justify-center gap-1.5 transition-all shadow-md"
+              className="px-6 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg shadow-blue-600/25 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50"
             >
               {isUploading ? (
                 <>
@@ -299,7 +308,7 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
                 </>
               ) : (
                 <>
-                  <Check size={15} />
+                  <Check size={15} strokeWidth={2.5} />
                   <span>Submit / Import</span>
                 </>
               )}

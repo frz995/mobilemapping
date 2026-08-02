@@ -43,7 +43,12 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
         {/* Burger Menu Button */}
         <button 
           onClick={() => setIsDrawerOpen(true)}
-          className="bg-white/80 backdrop-blur-md p-1.5 sm:p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-9 w-9 sm:h-10 sm:w-10 flex items-center justify-center shrink-0"
+          className={clsx(
+            "backdrop-blur-md p-1.5 sm:p-2 rounded-xl shadow-sm border transition-all duration-300 group h-9 w-9 sm:h-10 sm:w-10 flex items-center justify-center shrink-0",
+            isDark
+              ? "bg-slate-900/90 border-slate-700/70 text-slate-200 hover:bg-slate-800 hover:text-blue-400"
+              : "bg-white/80 border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md"
+          )}
         >
           <Menu size={18} />
         </button>
@@ -56,27 +61,35 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
               type="button"
               title="User Account"
               onClick={() => setIsUserToastExpanded(prev => !prev)}
-              className="bg-white/80 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center px-2 sm:px-2.5 h-9 sm:h-10 gap-1.5 sm:gap-2 hover:bg-white hover:shadow-md transition-all duration-300"
+              className={clsx(
+                "backdrop-blur-md border shadow-sm rounded-xl flex items-center px-2 sm:px-2.5 h-9 sm:h-10 gap-1.5 sm:gap-2 transition-all duration-300",
+                isDark
+                  ? "bg-slate-900/90 border-slate-700/70 text-slate-200 hover:bg-slate-800"
+                  : "bg-white/80 border-gray-200/50 text-gray-700 hover:bg-white hover:shadow-md"
+              )}
             >
               <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0">
                 {user.email?.[0]?.toUpperCase() ?? 'U'}
               </div>
-              <span className="text-xs font-bold text-gray-700 max-w-[100px] truncate hidden md:inline">
+              <span className={clsx("text-xs font-bold max-w-[100px] truncate hidden md:inline", isDark ? "text-slate-200" : "text-gray-700")}>
                 {user.email?.split('@')[0]}
               </span>
-              <ChevronDown size={14} className={clsx("text-gray-500 transition-transform duration-300 hidden sm:inline", isUserToastExpanded && "rotate-180")} />
+              <ChevronDown size={14} className={clsx("transition-transform duration-300 hidden sm:inline", isDark ? "text-slate-400" : "text-gray-500", isUserToastExpanded && "rotate-180")} />
             </button>
 
             {/* Floating Account Dropdown Panel */}
             {isUserToastExpanded && (
-              <div className="absolute left-0 top-11 w-60 sm:w-64 bg-white/95 backdrop-blur-md border border-gray-200/80 rounded-2xl shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
+              <div className={clsx(
+                "absolute left-0 top-11 w-60 sm:w-64 backdrop-blur-md border rounded-2xl shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-200",
+                isDark ? "bg-slate-900/95 border-slate-700/80 text-slate-100 shadow-slate-950/60" : "bg-white/95 border-gray-200/80 text-gray-800"
+              )}>
+                <div className={clsx("flex items-center gap-3 pb-3 border-b", isDark ? "border-slate-800" : "border-gray-100")}>
                   <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold shadow-md shrink-0">
                     {user.email?.[0]?.toUpperCase() ?? 'U'}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-bold text-gray-800">{user.email}</p>
-                    <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-600 uppercase tracking-wider mt-0.5">Active Account</span>
+                    <p className={clsx("truncate text-xs font-bold", isDark ? "text-slate-200" : "text-gray-800")}>{user.email}</p>
+                    <span className={clsx("inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider mt-0.5", isDark ? "bg-blue-950/60 text-blue-400 border border-blue-800/40" : "bg-blue-50 text-blue-600")}>Active Account</span>
                   </div>
                 </div>
 
@@ -84,9 +97,12 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                   <button
                     onClick={signOut}
                     title="Sign Out"
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 hover:bg-red-50 hover:border-red-200 hover:text-red-600 px-3 py-2 text-xs font-semibold text-gray-700 transition-all shadow-sm group"
+                    className={clsx(
+                      "flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-all shadow-sm group",
+                      isDark ? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-red-950/40 hover:border-red-800 hover:text-red-400" : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-red-50 hover:border-red-200 hover:text-red-600"
+                    )}
                   >
-                    <LogOut size={14} className="group-hover:text-red-600 transition-colors" />
+                    <LogOut size={14} className="group-hover:text-red-500 transition-colors" />
                     Sign Out
                   </button>
                 </div>
@@ -96,59 +112,67 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
         )}
 
         {/* Map Title Card - Hidden text on small mobile screens to prevent overflow */}
-        <div className="bg-white/80 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center p-1.5 gap-2.5 sm:min-w-[200px] pr-2 sm:pr-4 h-9 sm:h-10 transition-all duration-300 shrink-0">
+        <div className={clsx(
+          "backdrop-blur-md border shadow-sm rounded-xl flex items-center p-1.5 gap-2.5 sm:min-w-[200px] pr-2 sm:pr-4 h-9 sm:h-10 transition-all duration-300 shrink-0",
+          isDark ? "bg-slate-900/90 border-slate-700/70" : "bg-white/80 border-gray-200/50"
+        )}>
           <div className="w-6 h-6 sm:w-7 sm:h-7 bg-transparent rounded-lg flex items-center justify-center shrink-0">
-            <MapIcon className="text-blue-600" size={16} />
+            <MapIcon className={isDark ? "text-blue-400" : "text-blue-600"} size={16} />
           </div>
           <div className="hidden sm:flex flex-col justify-center h-full">
-            <h1 className="text-xs font-extrabold text-gray-800 tracking-tight leading-none font-display">360° Web Mapping</h1>
-            <span className="text-[8px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">StreetView Imagery</span>
+            <h1 className={clsx("text-xs font-extrabold tracking-tight leading-none font-display", isDark ? "text-slate-100" : "text-gray-800")}>360° Web Mapping</h1>
+            <span className={clsx("text-[8px] font-bold uppercase tracking-widest mt-0.5", isDark ? "text-blue-400" : "text-blue-600")}>StreetView Imagery</span>
           </div>
         </div>
 
         {/* Toolbox - Next to Title Card */}
         <div className="flex items-center">
             <div className={clsx(
-                "bg-white/70 backdrop-blur-md border border-gray-200/50 shadow-sm rounded-xl flex items-center overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)]",
+                "backdrop-blur-md border shadow-sm rounded-xl flex items-center overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)]",
+                isDark ? "bg-slate-900/90 border-slate-700/70 text-slate-200" : "bg-white/80 border-gray-200/50 text-gray-700",
                 isToolboxOpen ? "pr-1" : "" 
             )}>
                 <button 
                     onClick={() => setIsToolboxOpen(!isToolboxOpen)}
-                    className="flex items-center gap-2 px-3 h-10 text-gray-700 hover:text-blue-600 transition-colors"
+                    className={clsx("flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 h-9 sm:h-10 transition-colors", isDark ? "text-slate-200 hover:text-blue-400" : "text-gray-700 hover:text-blue-600")}
                 >
-                    <Wrench size={18} className="text-blue-600 font-bold" />
-                    <span className="text-xs font-bold text-gray-700">Toolbox</span>
-                    <ChevronRight size={16} className={clsx("transition-transform duration-300 text-blue-600", isToolboxOpen ? "rotate-180" : "")} />
+                    <Wrench size={18} className={clsx("font-bold", isDark ? "text-blue-400" : "text-blue-600")} />
+                    <span className={clsx("text-xs font-bold hidden sm:inline", isDark ? "text-slate-200" : "text-gray-700")}>Toolbox</span>
+                    <ChevronRight size={16} className={clsx("transition-transform duration-300", isDark ? "text-blue-400" : "text-blue-600", isToolboxOpen ? "rotate-180" : "")} />
                 </button>
 
                 <div className={clsx(
                     "flex items-center gap-1 transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)] overflow-hidden",
                     isToolboxOpen ? "max-w-[600px] opacity-100" : "max-w-0 opacity-0"
                 )}>
-                    <div className="w-px h-5 bg-gray-300 mx-1 flex-shrink-0"></div>
+                    <div className={clsx("w-px h-5 mx-1 flex-shrink-0", isDark ? "bg-slate-700" : "bg-gray-300")}></div>
           <button
             onClick={() => setActiveTool(activeTool === 'identify' ? null : 'identify')}
             className={clsx(
               "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              activeTool === 'identify' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
+              activeTool === 'identify'
+                ? isDark ? "bg-blue-950/60 text-blue-400" : "bg-blue-100 text-blue-700"
+                : isDark ? "text-slate-300 hover:bg-slate-800 hover:text-blue-400" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
             )}
             title="Identify Features"
           >
-            <MousePointer2 size={18} className={activeTool === 'identify' ? 'text-blue-700' : 'text-blue-500'} />
+            <MousePointer2 size={18} className={activeTool === 'identify' ? (isDark ? 'text-blue-400' : 'text-blue-700') : 'text-blue-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Identify</span>
           </button>
 
-          <div className="w-px h-5 bg-gray-300 mx-1"></div>
+          <div className={clsx("w-px h-5 mx-1 flex-shrink-0", isDark ? "bg-slate-700" : "bg-gray-300")}></div>
 
           <button
             onClick={() => setActiveTool(activeTool === 'polygon-measure' ? null : 'polygon-measure')}
             className={clsx(
               "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              activeTool === 'polygon-measure' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
+              activeTool === 'polygon-measure'
+                ? isDark ? "bg-blue-950/60 text-blue-400" : "bg-blue-100 text-blue-700"
+                : isDark ? "text-slate-300 hover:bg-slate-800 hover:text-blue-400" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
             )}
             title="Measure Area (Polygon)"
           >
-            <Hexagon size={18} className={activeTool === 'polygon-measure' ? 'text-blue-700' : 'text-pink-500'} />
+            <Hexagon size={18} className={activeTool === 'polygon-measure' ? (isDark ? 'text-blue-400' : 'text-blue-700') : 'text-pink-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Measure Area</span>
           </button>
 
@@ -156,45 +180,54 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
             onClick={() => setActiveTool(activeTool === 'buffer' ? null : 'buffer')}
             className={clsx(
               "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              activeTool === 'buffer' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
+              activeTool === 'buffer'
+                ? isDark ? "bg-blue-950/60 text-blue-400" : "bg-blue-100 text-blue-700"
+                : isDark ? "text-slate-300 hover:bg-slate-800 hover:text-blue-400" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
             )}
             title="Buffer Analysis"
           >
-            <Circle size={18} className={activeTool === 'buffer' ? 'text-blue-700' : 'text-purple-500'} />
+            <Circle size={18} className={activeTool === 'buffer' ? (isDark ? 'text-blue-400' : 'text-blue-700') : 'text-purple-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Buffer</span>
           </button>
 
-          <div className="w-px h-5 bg-gray-300 mx-1"></div>
+          <div className={clsx("w-px h-5 mx-1 flex-shrink-0", isDark ? "bg-slate-700" : "bg-gray-300")}></div>
 
           <button
             onClick={() => onOpenLayerSelect ? onOpenLayerSelect() : setIsTableOpen(!isTableOpen)}
             className={clsx(
               "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              isTableOpen ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
+              isTableOpen
+                ? isDark ? "bg-blue-950/60 text-blue-400" : "bg-blue-100 text-blue-700"
+                : isDark ? "text-slate-300 hover:bg-slate-800 hover:text-blue-400" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
             )}
             title="Attribute Table (Select Layer)"
           >
-            <Table size={18} className={isTableOpen ? 'text-blue-700' : 'text-emerald-500'} />
+            <Table size={18} className={isTableOpen ? (isDark ? 'text-blue-400' : 'text-blue-700') : 'text-emerald-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Attribute Table</span>
           </button>
 
-          <div className="w-px h-5 bg-gray-300 mx-1"></div>
+          <div className={clsx("w-px h-5 mx-1 flex-shrink-0", isDark ? "bg-slate-700" : "bg-gray-300")}></div>
 
           <button
             onClick={() => setActiveTool('upload')}
             className={clsx(
               "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
-              activeTool === 'upload' ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
+              activeTool === 'upload'
+                ? isDark ? "bg-blue-950/60 text-blue-400" : "bg-blue-100 text-blue-700"
+                : isDark ? "text-slate-300 hover:bg-slate-800 hover:text-blue-400" : "text-gray-600 hover:bg-white hover:text-blue-600 hover:shadow-sm"
             )}
             title="Upload Data (GeoJSON, KML, CSV)"
           >
-            <Upload size={18} className={activeTool === 'upload' ? 'text-blue-700' : 'text-blue-500'} />
+            <Upload size={18} className={activeTool === 'upload' ? (isDark ? 'text-blue-400' : 'text-blue-700') : 'text-blue-500'} />
             <span className="absolute top-full mt-2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Upload Data</span>
           </button>
 
           <button
             onClick={() => setActiveTool('download')}
-            className="p-1.5 rounded-lg text-gray-600 hover:bg-white hover:text-green-600 hover:shadow-sm transition-colors flex items-center justify-center group relative"
+            className={clsx(
+              "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
+              isDark ? "text-slate-300 hover:bg-slate-800 hover:text-green-400" : "text-gray-600 hover:bg-white hover:text-green-600 hover:shadow-sm"
+            )}
             title="Export Data"
           >
             <Download size={18} className="text-green-500" />
@@ -203,7 +236,10 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
 
           <button
             onClick={() => setActiveTool('clear')}
-            className="p-1.5 rounded-lg text-gray-600 hover:bg-white hover:text-red-500 hover:shadow-sm transition-colors flex items-center justify-center group relative"
+            className={clsx(
+              "p-1.5 rounded-lg transition-colors flex items-center justify-center group relative",
+              isDark ? "text-slate-300 hover:bg-slate-800 hover:text-red-400" : "text-gray-600 hover:bg-white hover:text-red-500 hover:shadow-sm"
+            )}
             title="Clear Analysis"
           >
             <Trash2 size={18} className="text-red-500" />
@@ -212,7 +248,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
         </div>
       </div>
     </div>
-      </div>
+  </div>
 
       {/* Top Right: Theme Toggle + Basemap Switcher + Viewer Toggle */}
       <div className="absolute top-4 right-4 pointer-events-auto z-[2000] flex items-center gap-2">
@@ -224,8 +260,8 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
           className={clsx(
             "relative h-10 w-[72px] rounded-xl border shadow-sm backdrop-blur-md transition-all duration-300 flex items-center px-1",
             isDark
-              ? "bg-slate-800/90 border-slate-600/50 hover:bg-slate-700/90"
-              : "bg-white/70 border-gray-200/50 hover:bg-white hover:shadow-md"
+              ? "bg-slate-900/90 border-slate-700/70 hover:bg-slate-800"
+              : "bg-white/80 border-gray-200/50 hover:bg-white hover:shadow-md"
           )}
         >
           {/* Track icons */}
@@ -235,7 +271,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
           <div className={clsx(
             "w-6 h-7 rounded-lg shadow-md transform transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] flex items-center justify-center",
             isDark
-              ? "translate-x-[36px] bg-indigo-600"
+              ? "translate-x-[36px] bg-blue-600"
               : "translate-x-0 bg-white border border-gray-200"
           )}>
             {isDark
@@ -248,8 +284,10 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
         <button 
           onClick={() => setIsViewerOpen(!isViewerOpen)}
           className={clsx(
-            "bg-white/70 backdrop-blur-md p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-10 w-10 flex items-center justify-center",
-            !isViewerOpen && "bg-blue-50 text-blue-600 border-blue-200"
+            "backdrop-blur-md p-2 rounded-xl shadow-sm border transition-all duration-300 group h-10 w-10 flex items-center justify-center",
+            isDark
+              ? (!isViewerOpen ? "bg-blue-950/60 border-blue-800 text-blue-400" : "bg-slate-900/90 border-slate-700/70 text-slate-200 hover:bg-slate-800 hover:text-blue-400")
+              : (!isViewerOpen ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white/80 border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md")
           )}
           title={isViewerOpen ? "Hide 360° Viewer" : "Show 360° Viewer"}
         >
@@ -259,7 +297,12 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
         <div className="relative">
           <button 
             onClick={() => setIsBasemapOpen(!isBasemapOpen)}
-            className="bg-white/70 backdrop-blur-md p-2 rounded-xl shadow-sm border border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md transition-all duration-300 group h-10 w-10 flex items-center justify-center"
+            className={clsx(
+              "backdrop-blur-md p-2 rounded-xl shadow-sm border transition-all duration-300 group h-10 w-10 flex items-center justify-center",
+              isDark
+                ? "bg-slate-900/90 border-slate-700/70 text-slate-200 hover:bg-slate-800 hover:text-blue-400"
+                : "bg-white/80 border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md"
+            )}
             title="Change Basemap"
           >
             <Layers size={20} />
@@ -267,12 +310,13 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
 
           {/* Basemap Dropdown */}
           <div className={clsx(
-            "absolute right-0 top-12 bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-gray-100/50 w-72 overflow-hidden transition-all duration-300 origin-top-right",
+            "absolute right-0 top-12 backdrop-blur-md rounded-xl shadow-xl border w-72 overflow-hidden transition-all duration-300 origin-top-right",
+            isDark ? "bg-slate-900/95 border-slate-700/80 text-slate-100 shadow-slate-950/60" : "bg-white/90 border-gray-100/50 text-gray-800",
             isBasemapOpen ? "opacity-100 scale-100 translate-y-0 pointer-events-auto" : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
           )}>
-            <div className="p-3 bg-gray-50/80 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center justify-between">
+            <div className={clsx("p-3 border-b text-[10px] font-bold uppercase tracking-widest flex items-center justify-between", isDark ? "bg-slate-800/80 border-slate-700/60 text-slate-400" : "bg-gray-50/80 border-gray-100 text-gray-400")}>
               <span>Select Basemap</span>
-              <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-[9px]">{BASEMAPS.length} Maps</span>
+              <span className={clsx("px-1.5 py-0.5 rounded text-[9px]", isDark ? "bg-blue-950/60 text-blue-400 border border-blue-800/40" : "bg-blue-100 text-blue-600")}>{BASEMAPS.length} Maps</span>
             </div>
             
             <div className="max-h-[calc(100vh-200px)] overflow-y-auto p-2">
@@ -288,11 +332,11 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                       "group relative flex flex-col items-start overflow-hidden rounded-lg border transition-all duration-200",
                       activeBasemap === map.id 
                         ? "border-blue-500 ring-2 ring-blue-500/20 shadow-md" 
-                        : "border-gray-200 hover:border-gray-300 hover:shadow-sm bg-white"
+                        : isDark ? "border-slate-700 hover:border-slate-600 bg-slate-800/80" : "border-gray-200 hover:border-gray-300 hover:shadow-sm bg-white"
                     )}
                   >
                     {/* Preview Image */}
-                    <div className="w-full h-20 bg-gray-100 relative overflow-hidden">
+                    <div className={clsx("w-full h-20 relative overflow-hidden", isDark ? "bg-slate-800" : "bg-gray-100")}>
                       {map.preview ? (
                         <img 
                           src={map.preview} 
@@ -301,7 +345,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                           loading="lazy"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-300">
+                        <div className={clsx("w-full h-full flex items-center justify-center", isDark ? "text-slate-600" : "text-gray-300")}>
                           <MapIcon size={24} />
                         </div>
                       )}
@@ -317,13 +361,8 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                     </div>
 
                     {/* Label */}
-                    <div className="w-full p-2 bg-white/90 backdrop-blur-sm border-t border-gray-100/50">
-                      <div className={clsx(
-                        "text-xs font-medium truncate",
-                        activeBasemap === map.id ? "text-blue-700" : "text-gray-700"
-                      )}>
-                        {map.name}
-                      </div>
+                    <div className={clsx("w-full p-2 backdrop-blur-sm border-t text-xs font-bold", isDark ? "bg-slate-900/90 border-slate-700/60 text-slate-200" : "bg-white/90 border-gray-100/50 text-gray-800")}>
+                      {map.name}
                     </div>
                   </button>
                 ))}
@@ -412,26 +451,33 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
       {/* Layers Panel - Below Title */}
       <div 
         className={clsx(
-          "absolute top-20 left-4 pointer-events-auto bg-white/80 backdrop-blur-md border border-gray-200/50 shadow-lg overflow-hidden flex flex-col transition-all duration-[800ms] ease-[cubic-bezier(0.25,1,0.5,1)] origin-top-left z-[2000]",
-          isOpen ? "w-80 rounded-2xl max-h-[calc(100vh-12rem)]" : "w-[150px] rounded-xl max-h-[46px] hover:bg-white"
+          "absolute top-14 left-2 sm:top-20 sm:left-4 pointer-events-auto backdrop-blur-md border shadow-lg overflow-hidden flex flex-col transition-all duration-[800ms] ease-[cubic-bezier(0.25,1,0.5,1)] origin-top-left z-[2000]",
+          isDark
+            ? "bg-slate-900/90 border-slate-700/70 text-slate-100 shadow-slate-950/50"
+            : "bg-white/80 border-gray-200/50 text-gray-800",
+          isOpen ? "w-[calc(100vw-1rem)] sm:w-80 rounded-2xl max-h-[calc(100vh-12rem)]" : "w-[130px] sm:w-[150px] rounded-xl max-h-[46px]"
         )}
       >
         {/* Header / Toggle Area - Always Visible */}
         <div 
            onClick={() => setIsOpen(!isOpen)}
            className={clsx(
-             "flex items-center gap-2 px-4 py-2.5 cursor-pointer w-full transition-colors duration-300",
-             isOpen ? "bg-white/50" : "hover:bg-white/50"
+             "flex items-center gap-2 px-4 py-2.5 cursor-pointer w-full transition-colors duration-300 border-b",
+             isDark
+               ? (isOpen ? "bg-slate-800/80 border-slate-700/60" : "hover:bg-slate-800/60 border-transparent")
+               : (isOpen ? "bg-slate-100/60 border-gray-200/50" : "hover:bg-slate-100/40 border-transparent"),
+             !isOpen && "border-b-0"
            )}
         >
-             <Layers size={16} className={clsx("transition-colors duration-300", isOpen ? "text-gray-600" : "text-gray-500")} />
-             <span className={clsx("text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors duration-300", isOpen ? "text-gray-700" : "text-gray-600")}>Map Layers</span>
-             <ChevronDown size={16} className={clsx("ml-auto transition-transform duration-[600ms] ease-[cubic-bezier(0.25,1,0.5,1)]", isOpen ? "rotate-180 text-gray-600" : "text-gray-400")} />
+             <Layers size={16} className={clsx("transition-colors duration-300", isDark ? "text-blue-400" : "text-blue-600")} />
+             <span className={clsx("text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors duration-300", isDark ? "text-slate-200" : "text-slate-700")}>Map Layers</span>
+             <ChevronDown size={16} className={clsx("ml-auto transition-transform duration-[600ms] ease-[cubic-bezier(0.25,1,0.5,1)]", isOpen ? "rotate-180" : "", isDark ? "text-slate-400" : "text-gray-400")} />
         </div>
 
         {/* Content Area - Animate Opacity */}
         <div className={clsx(
-            "flex-1 overflow-y-auto px-3 pb-3 scrollbar-thin scrollbar-thumb-gray-200/50 transition-all duration-500 ease-in-out",
+            "flex-1 overflow-y-auto px-3 pb-3 scrollbar-thin transition-all duration-500 ease-in-out",
+            isDark ? "scrollbar-thumb-slate-700" : "scrollbar-thumb-gray-200/50",
             isOpen ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4 pointer-events-none"
         )}>
            {/* Layer List */}
@@ -439,10 +485,15 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
              {layers.length > 0 ? layers.map((ly) => {
                const isActive = activeLayers.includes(ly.name);
                return (
-                 <div key={ly.name} className="flex flex-col bg-white/40 rounded-lg transition-all duration-200 border border-transparent hover:bg-white/50 hover:border-gray-200">
+                 <div key={ly.name} className={clsx(
+                   "flex flex-col rounded-xl transition-all duration-200 border",
+                   isDark
+                     ? "bg-slate-800/40 border-slate-700/50 hover:bg-slate-800/80"
+                     : "bg-white/40 border-transparent hover:bg-white/80 hover:border-gray-200"
+                 )}>
                    <div className={clsx(
-                     "flex items-center gap-2 p-2.5 rounded-lg transition-all duration-200",
-                     isActive && "bg-blue-50/50"
+                     "flex items-center gap-2 p-2.5 rounded-xl transition-all duration-200",
+                     isActive && (isDark ? "bg-blue-950/40" : "bg-blue-50/50")
                    )}>
                      <label className="flex-1 flex items-center gap-3 cursor-pointer">
                        <div className="relative flex items-center">
@@ -455,12 +506,12 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                          {/* Custom Checkbox UI */}
                          <div className={clsx(
                            "w-4 h-4 rounded border flex items-center justify-center transition-colors",
-                           isActive ? "bg-blue-600 border-blue-600" : "bg-white border-gray-300"
+                           isActive ? "bg-blue-600 border-blue-600" : isDark ? "bg-slate-800 border-slate-700" : "bg-white border-gray-300"
                          )}>
                            {isActive && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
                          </div>
                        </div>
-                       <span className="text-xs font-medium select-none text-gray-700">{ly.title || ly.name}</span>
+                       <span className={clsx("text-xs font-medium select-none", isDark ? "text-slate-200" : "text-gray-700")}>{ly.title || ly.name}</span>
                      </label>
                      
                      {/* 3-Dot Menu Button (Only for Panotrack) */}
@@ -472,7 +523,9 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                           }}
                           className={clsx(
                             "p-1.5 rounded-md transition-colors",
-                            filterMenuOpen === ly.name ? "bg-blue-100 text-blue-600" : "text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                            filterMenuOpen === ly.name
+                              ? isDark ? "bg-blue-900/60 text-blue-400" : "bg-blue-100 text-blue-600"
+                              : isDark ? "text-slate-400 hover:text-blue-400 hover:bg-slate-700" : "text-gray-400 hover:text-blue-600 hover:bg-blue-50"
                           )}
                           title="Filter Options"
                         >
@@ -483,10 +536,13 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
 
                    {/* Filter Panel */}
                    {filterMenuOpen === ly.name && isActive && (
-                      <div className="mx-3 mb-3 mt-1 p-3 bg-white/80 backdrop-blur-sm rounded-lg border border-blue-100 text-xs space-y-3 shadow-sm animate-in slide-in-from-top-2 duration-200">
+                      <div className={clsx(
+                        "mx-3 mb-3 mt-1 p-3 rounded-xl border text-xs space-y-3 shadow-sm animate-in slide-in-from-top-2 duration-200",
+                        isDark ? "bg-slate-800/90 border-slate-700/80 text-slate-200" : "bg-white/80 border-blue-100 text-gray-700"
+                      )}>
                          {/* Subgrid Filter */}
                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 text-blue-600 font-bold uppercase tracking-wider text-[10px]">
+                            <div className={clsx("flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]", isDark ? "text-blue-400" : "text-blue-600")}>
                                <Grid size={12} />
                                <span>Subgrid Filter</span>
                             </div>
@@ -494,14 +550,17 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                               <select 
                                  value={filterSubgrid}
                                  onChange={(e) => setFilterSubgrid(e.target.value)}
-                                 className="w-full px-2 py-1.5 rounded border border-gray-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white text-gray-700 appearance-none text-xs cursor-pointer"
+                                 className={clsx(
+                                   "w-full px-2 py-1.5 rounded-lg border text-xs cursor-pointer focus:outline-none appearance-none",
+                                   isDark ? "bg-slate-900 border-slate-700 text-slate-200" : "bg-white border-gray-200 text-gray-700"
+                                 )}
                               >
                                  <option value="">All Subgrids</option>
                                  {availableSubgrids.map((grid) => (
                                    <option key={grid} value={grid}>{grid}</option>
                                  ))}
                               </select>
-                              <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-gray-500">
+                              <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-slate-400">
                                 <ChevronDown size={14} />
                               </div>
                             </div>
@@ -509,7 +568,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
               
                          {/* Date Input */}
                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 text-blue-600 font-bold uppercase tracking-wider text-[10px]">
+                            <div className={clsx("flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]", isDark ? "text-blue-400" : "text-blue-600")}>
                                <Calendar size={12} />
                                <span>Date Publish</span>
                             </div>
@@ -518,12 +577,18 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                                   type="date" 
                                   value={filterDate}
                                   onChange={(e) => setFilterDate(e.target.value)}
-                                  className="w-full px-2 py-1.5 rounded border border-gray-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white text-gray-700"
+                                  className={clsx(
+                                    "w-full px-2 py-1.5 rounded-lg border text-xs focus:outline-none",
+                                    isDark ? "bg-slate-900 border-slate-700 text-slate-200" : "bg-white border-gray-200 text-gray-700"
+                                  )}
                                />
                                {filterDate && (
                                  <button
                                    onClick={() => setFilterDate('')}
-                                   className="p-1.5 bg-red-50 text-red-500 rounded border border-red-100 hover:bg-red-100 transition-colors shrink-0"
+                                   className={clsx(
+                                     "p-1.5 rounded border transition-colors shrink-0",
+                                     isDark ? "bg-red-950/60 border-red-800 text-red-400 hover:bg-red-900" : "bg-red-50 text-red-500 border-red-100 hover:bg-red-100"
+                                   )}
                                    title="Clear Date"
                                  >
                                    <X size={14} />
@@ -539,7 +604,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                                   onChange={(e) => setFilterDateStrict(e.target.checked)}
                                   className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3 w-3"
                                />
-                               <span className="text-[10px] text-gray-600">Hide older data</span>
+                               <span className={clsx("text-[10px]", isDark ? "text-slate-400" : "text-gray-600")}>Hide older data</span>
                             </label>
                             
                             {/* Zoom to Track Button */}
@@ -548,7 +613,10 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                                 e.stopPropagation();
                                 if (onZoomToTrack) onZoomToTrack();
                               }}
-                              className="w-full flex items-center justify-center gap-2 px-2 py-1.5 mt-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded border border-blue-200 transition-colors text-xs font-medium"
+                              className={clsx(
+                                "w-full flex items-center justify-center gap-2 px-2 py-1.5 mt-1 rounded border transition-colors text-xs font-medium",
+                                isDark ? "bg-blue-950/60 text-blue-400 border-blue-800 hover:bg-blue-900/60" : "bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200"
+                              )}
                               title="Zoom to filtered data"
                             >
                               <MapIcon size={12} />
@@ -561,26 +629,26 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                             <label className="flex items-center gap-2 cursor-pointer group select-none">
                                <div className={clsx(
                                   "w-8 h-4 rounded-full p-0.5 transition-colors duration-300 border border-transparent",
-                                  filterColorByDate ? "bg-blue-600" : "bg-gray-200 group-hover:bg-gray-300"
+                                  filterColorByDate ? "bg-blue-600" : isDark ? "bg-slate-700 group-hover:bg-slate-600" : "bg-gray-200 group-hover:bg-gray-300"
                                )}>
                                   <div className={clsx(
                                      "w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-300",
                                      filterColorByDate ? "translate-x-4" : "translate-x-0"
                                   )} />
                                </div>
-                               <span className="text-gray-600 group-hover:text-blue-600 transition-colors font-medium">Color by Date</span>
+                               <span className={clsx("transition-colors font-medium", isDark ? "text-slate-300 group-hover:text-blue-400" : "text-gray-600 group-hover:text-blue-600")}>Color by Date</span>
                             </label>
 
                             {/* Legend */}
                             {filterColorByDate && (
-                               <div className="flex items-center gap-4 bg-gray-50 p-2 rounded border border-gray-100">
+                               <div className={clsx("flex items-center gap-4 p-2 rounded border", isDark ? "bg-slate-900 border-slate-700" : "bg-gray-50 border-gray-100")}>
                                   <div className="flex items-center gap-1.5">
                                      <div className="w-2.5 h-2.5 rounded-full bg-green-500 border border-green-600" />
-                                     <span className="text-[10px] text-gray-500 font-medium">Newer</span>
+                                     <span className={clsx("text-[10px] font-medium", isDark ? "text-slate-400" : "text-gray-500")}>Newer</span>
                                   </div>
                                   <div className="flex items-center gap-1.5">
                                      <div className="w-2.5 h-2.5 rounded-full bg-red-500 border border-red-600" />
-                                     <span className="text-[10px] text-gray-500 font-medium">Older</span>
+                                     <span className={clsx("text-[10px] font-medium", isDark ? "text-slate-400" : "text-gray-500")}>Older</span>
                                   </div>
                                </div>
                             )}
@@ -590,7 +658,7 @@ const Sidebar = ({ isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers,
                  </div>
                );
              }) : (
-               <p className="text-xs text-gray-500 px-2">No layers available</p>
+               <p className={clsx("text-xs px-2", isDark ? "text-slate-400" : "text-gray-500")}>No layers available</p>
              )}
            </div>
         </div>

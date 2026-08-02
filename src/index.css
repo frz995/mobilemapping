@@ -148,7 +148,9 @@ html, body, #root {
 [data-theme="dark"] .bg-white\/80,
 [data-theme="dark"] .bg-white\/90,
 [data-theme="dark"] .bg-white\/95,
-[data-theme="dark"] .bg-white\/70 {
+[data-theme="dark"] .bg-white\/70,
+[data-theme="dark"] .bg-white\/60,
+[data-theme="dark"] .bg-white\/50 {
   background-color: rgba(22, 28, 40, 0.88) !important;
 }
 [data-theme="dark"] .bg-white {

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Download, Globe, FileCode, Check, SlidersHorizontal } from 'lucide-react';
 import JSZip from 'jszip';
+import { useTheme } from '../context/ThemeContext';
+import clsx from 'clsx';
 
 const FORMAT_OPTIONS = [
   { id: 'GeoJson', label: 'GeoJSON', ext: '.geojson', mime: 'application/json', desc: 'Standard GIS GeoJSON' },
@@ -178,6 +180,7 @@ const getPrjContent = (crs) => {
 };
 
 const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
+  const { isDark } = useTheme();
   const [format, setFormat] = useState('GeoJson');
   const [extent, setExtent] = useState('All Data');
   const [crs, setCrs] = useState('EPSG:4326');
@@ -360,26 +363,31 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
 
   return (
     <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-md z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white/95 backdrop-blur-2xl border border-slate-200/90 text-slate-800 rounded-3xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.15)] max-w-lg w-full p-6 space-y-6 relative overflow-hidden">
+      <div className={clsx(
+        "backdrop-blur-2xl border max-w-lg w-full p-6 space-y-6 relative overflow-hidden rounded-3xl transition-all duration-300",
+        isDark
+          ? "bg-slate-900/95 border-slate-800 text-slate-100 shadow-2xl shadow-slate-950/80"
+          : "bg-white/95 border-slate-200/90 text-slate-800 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.15)]"
+      )}>
         
         {/* Top Decorative Subtle Ambient Gradient */}
         <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-32 bg-blue-500/10 blur-3xl rounded-full pointer-events-none" />
 
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 relative">
+        <div className={clsx("flex items-center justify-between pb-4 border-b relative", isDark ? "border-slate-800" : "border-slate-100")}>
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-blue-50 border border-blue-100 rounded-2xl text-blue-600 shadow-sm">
+            <div className={clsx("p-2.5 border rounded-2xl shadow-sm", isDark ? "bg-blue-950/60 border-blue-800/60 text-blue-400" : "bg-blue-50 border-blue-100 text-blue-600")}>
               <Download size={22} />
             </div>
             <div>
-              <h3 className="font-extrabold text-base text-slate-800 tracking-tight">Export Spatial Data</h3>
+              <h3 className={clsx("font-extrabold text-base tracking-tight", isDark ? "text-slate-100" : "text-slate-800")}>Export Spatial Data</h3>
               <p className="text-[11px] font-semibold text-slate-400">Select GIS vector format & projection parameters ({dataPoints.length} features)</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-2xl transition-all"
+            className={clsx("p-2 rounded-2xl transition-all", isDark ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100")}
           >
             <X size={18} />
           </button>
@@ -392,7 +400,7 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase">Export Format</span>
-              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+              <span className={clsx("text-[10px] font-bold px-2.5 py-0.5 rounded-full border", isDark ? "text-blue-400 bg-blue-950/60 border-blue-800/40" : "text-blue-600 bg-blue-50 border-blue-100")}>
                 {FORMAT_OPTIONS.find(f => f.id === format)?.ext}
               </span>
             </div>
@@ -405,13 +413,16 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
                     key={item.id}
                     type="button"
                     onClick={() => setFormat(item.id)}
-                    className={`py-3 px-2 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1 active:scale-95 ${
+                    className={clsx(
+                      "py-3 px-2 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1 active:scale-95",
                       isSelected
-                        ? 'bg-blue-600 border-blue-600 text-white font-bold shadow-md shadow-blue-600/25 ring-2 ring-blue-600/20'
-                        : 'bg-slate-50/80 border-slate-200/80 text-slate-700 hover:bg-white hover:border-slate-300 hover:shadow-sm'
-                    }`}
+                        ? "bg-blue-600 border-blue-600 text-white font-bold shadow-md shadow-blue-600/25 ring-2 ring-blue-600/20"
+                        : isDark
+                        ? "bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-slate-600"
+                        : "bg-slate-50/80 border-slate-200/80 text-slate-700 hover:bg-white hover:border-slate-300 hover:shadow-sm"
+                    )}
                   >
-                    <FileCode size={16} className={isSelected ? 'text-white' : 'text-slate-400'} />
+                    <FileCode size={16} className={isSelected ? "text-white" : "text-slate-400"} />
                     <span className="text-xs font-bold leading-none">{item.label}</span>
                   </button>
                 );
@@ -422,7 +433,7 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
           {/* Spatial Extent Options */}
           <div className="space-y-2">
             <span className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase">Spatial Extent</span>
-            <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100/70 border border-slate-200/60 rounded-2xl">
+            <div className={clsx("grid grid-cols-3 gap-2 p-1 border rounded-2xl", isDark ? "bg-slate-800/60 border-slate-700/60" : "bg-slate-100/70 border-slate-200/60")}>
               {EXTENT_OPTIONS.map((item) => {
                 const isSelected = extent === item.id;
                 return (
@@ -438,14 +449,15 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
                         setExtent(item.id);
                       }
                     }}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                    className={clsx(
+                      "py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2",
                       isSelected
-                        ? 'bg-white text-blue-600 shadow-sm border border-slate-200/80'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                        ? isDark ? "bg-slate-900 text-blue-400 border border-slate-700 shadow-sm" : "bg-white text-blue-600 shadow-sm border border-slate-200/80"
+                        : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-600 hover:text-slate-900"
+                    )}
                   >
                     <span>{item.label}</span>
-                    {isSelected && <Check size={13} strokeWidth={3} className="text-blue-600" />}
+                    {isSelected && <Check size={13} strokeWidth={3} className={isDark ? "text-blue-400" : "text-blue-600"} />}
                   </button>
                 );
               })}
@@ -455,14 +467,17 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
           {/* Coordinate Reference System Selector */}
           <div className="space-y-1.5">
             <label className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase flex items-center gap-1.5">
-              <Globe size={12} className="text-blue-600" />
+              <Globe size={12} className={isDark ? "text-blue-400" : "text-blue-600"} />
               <span>Coordinate Reference System (CRS)</span>
             </label>
             <div className="relative">
               <select
                 value={crs}
                 onChange={(e) => setCrs(e.target.value)}
-                className="w-full bg-slate-50/90 border border-slate-200/90 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer appearance-none shadow-sm transition-all"
+                className={clsx(
+                  "w-full rounded-2xl px-4 py-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer appearance-none shadow-sm transition-all border",
+                  isDark ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-slate-50/90 border-slate-200/90 text-slate-800"
+                )}
               >
                 <option value="EPSG:4326">EPSG:4326 — WGS 84 (Geographic Lat/Lon)</option>
                 <option value="EPSG:3857">EPSG:3857 — Web Mercator (Auxiliary Sphere)</option>
@@ -483,32 +498,36 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
             <div className="grid grid-cols-2 gap-2.5">
               <label
                 onClick={() => setAttachDomainTable(!attachDomainTable)}
-                className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between gap-2 select-none ${
+                className={clsx(
+                  "p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between gap-2 select-none",
                   attachDomainTable
-                    ? 'bg-blue-50/80 border-blue-500/80 shadow-sm'
-                    : 'bg-slate-50/60 border-slate-200/70 hover:bg-white hover:border-slate-300'
-                }`}
+                    ? isDark ? "bg-blue-950/60 border-blue-800/60 shadow-sm" : "bg-blue-50/80 border-blue-500/80 shadow-sm"
+                    : isDark ? "bg-slate-800/40 border-slate-700/60 hover:bg-slate-800" : "bg-slate-50/60 border-slate-200/70 hover:bg-white hover:border-slate-300"
+                )}
               >
-                <span className="text-xs font-bold text-slate-800">Attach Domain Table</span>
-                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${
-                  attachDomainTable ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 bg-white'
-                }`}>
+                <span className={clsx("text-xs font-bold", isDark ? "text-slate-200" : "text-slate-800")}>Attach Domain Table</span>
+                <div className={clsx(
+                  "w-4 h-4 rounded-md border flex items-center justify-center transition-all",
+                  attachDomainTable ? "bg-blue-600 border-blue-600 text-white" : isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"
+                )}>
                   {attachDomainTable && <Check size={11} strokeWidth={3} />}
                 </div>
               </label>
 
               <label
                 onClick={() => setDownloadAttachmentIds(!downloadAttachmentIds)}
-                className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between gap-2 select-none ${
+                className={clsx(
+                  "p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between gap-2 select-none",
                   downloadAttachmentIds
-                    ? 'bg-blue-50/80 border-blue-500/80 shadow-sm'
-                    : 'bg-slate-50/60 border-slate-200/70 hover:bg-white hover:border-slate-300'
-                }`}
+                    ? isDark ? "bg-blue-950/60 border-blue-800/60 shadow-sm" : "bg-blue-50/80 border-blue-500/80 shadow-sm"
+                    : isDark ? "bg-slate-800/40 border-slate-700/60 hover:bg-slate-800" : "bg-slate-50/60 border-slate-200/70 hover:bg-white hover:border-slate-300"
+                )}
               >
-                <span className="text-xs font-bold text-slate-800">Include Attachment IDs</span>
-                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${
-                  downloadAttachmentIds ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 bg-white'
-                }`}>
+                <span className={clsx("text-xs font-bold", isDark ? "text-slate-200" : "text-slate-800")}>Include Attachment IDs</span>
+                <div className={clsx(
+                  "w-4 h-4 rounded-md border flex items-center justify-center transition-all",
+                  downloadAttachmentIds ? "bg-blue-600 border-blue-600 text-white" : isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"
+                )}>
                   {downloadAttachmentIds && <Check size={11} strokeWidth={3} />}
                 </div>
               </label>
@@ -518,11 +537,11 @@ const ExportModal = ({ isOpen, onClose, dataPoints = [], onStartDrawBBox }) => {
         </div>
 
         {/* Footer Action Buttons */}
-        <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+        <div className={clsx("flex items-center justify-end gap-3 pt-3 border-t", isDark ? "border-slate-800" : "border-slate-100")}>
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 rounded-2xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 font-semibold text-xs transition-all"
+            className={clsx("px-5 py-2.5 rounded-2xl font-semibold text-xs transition-all", isDark ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100")}
           >
             Cancel
           </button>

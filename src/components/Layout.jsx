@@ -52,6 +52,15 @@ const Layout = () => {
   const [isViewerOpen, setIsViewerOpen] = useState(true);
   const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const viewerRef = useRef(null);
 
@@ -439,13 +448,17 @@ const Layout = () => {
 
       {/* Main Content Area */}
       <div
-        className="flex-1 flex flex-row h-full relative transition-all duration-300"
+        className="flex-1 flex flex-col md:flex-row h-full relative transition-all duration-300"
       >
 
-        {/* Left Panel: Map */}
+        {/* Left / Top Panel: Map */}
         <div
-          className="h-full relative overflow-hidden flex flex-col transition-all duration-300"
-          style={{ width: isViewerOpen ? `${splitRatio}%` : '100%' }}
+          className="relative overflow-hidden flex flex-col transition-all duration-300"
+          style={
+            isMobile
+              ? { width: '100%', height: isViewerOpen ? '50%' : '100%' }
+              : { width: isViewerOpen ? `${splitRatio}%` : '100%', height: '100%' }
+          }
         >
           {pointsError && (
             <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
@@ -498,18 +511,26 @@ const Layout = () => {
         {/* Divider */}
         {isViewerOpen && (
           <div
-            className="w-1 bg-gray-800 hover:bg-blue-500 cursor-col-resize z-10 flex items-center justify-center relative hover:shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-colors"
-            onMouseDown={startDrag}
+            className={
+              isMobile
+                ? "h-1.5 w-full bg-gray-800 hover:bg-blue-500 cursor-row-resize z-10 flex items-center justify-center relative hover:shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-colors shrink-0"
+                : "w-1 h-full bg-gray-800 hover:bg-blue-500 cursor-col-resize z-10 flex items-center justify-center relative hover:shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-colors shrink-0"
+            }
+            onMouseDown={!isMobile ? startDrag : undefined}
           >
-            <div className="h-8 w-1 bg-gray-600 rounded-full" />
+            <div className={isMobile ? "w-8 h-1 bg-gray-600 rounded-full" : "h-8 w-1 bg-gray-600 rounded-full"} />
           </div>
         )}
 
-        {/* Right Panel: Viewer */}
+        {/* Right / Bottom Panel: Viewer */}
         {isViewerOpen && (
           <div
-            className="h-full bg-black relative flex flex-col overflow-hidden"
-            style={{ width: `${100 - splitRatio}%` }}
+            className="bg-black relative flex flex-col overflow-hidden transition-all duration-300"
+            style={
+              isMobile
+                ? { width: '100%', height: '50%' }
+                : { width: `${100 - splitRatio}%`, height: '100%' }
+            }
           >
             {selectedPoint ? (
               <Viewer
