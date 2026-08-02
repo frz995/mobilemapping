@@ -16,20 +16,102 @@ const MenuLink = ({ icon: Icon, label, active, onClick }) => (
 );
 
 const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut }) => {
-  if (isEmbed) {
-    return null;
-  }
-
-  const layers = [
-    { name: 'panotrack', title: 'Panotrack (360 Views)' }
-  ];
-
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isBasemapOpen, setIsBasemapOpen] = useState(false);
   const [isToolboxOpen, setIsToolboxOpen] = useState(false);
   const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(null);
   const { isDark, toggleTheme } = useTheme();
+
+  if (isEmbed) {
+    return (
+      <div className="fixed inset-0 pointer-events-none z-[9000]">
+        {/* Top Right: Basemap Switcher Only */}
+        <div className="absolute top-4 right-4 pointer-events-auto z-[2000] flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setIsBasemapOpen(!isBasemapOpen)}
+              className={clsx(
+                "backdrop-blur-md p-2 rounded-xl shadow-md border transition-all duration-300 group h-10 w-10 flex items-center justify-center",
+                isDark
+                  ? "bg-slate-900/90 border-slate-700/70 text-slate-200 hover:bg-slate-800 hover:text-blue-400"
+                  : "bg-white/90 border-gray-200/50 text-gray-700 hover:bg-white hover:text-blue-600 hover:shadow-md"
+              )}
+              title="Change Basemap Layer"
+            >
+              <Layers size={20} />
+            </button>
+
+            {/* Basemap Dropdown */}
+            <div className={clsx(
+              "absolute right-0 top-12 backdrop-blur-md rounded-xl shadow-xl border w-72 overflow-hidden transition-all duration-300 origin-top-right z-[3000]",
+              isDark ? "bg-slate-900/95 border-slate-700/80 text-slate-100 shadow-slate-950/60" : "bg-white/95 border-gray-100/50 text-gray-800",
+              isBasemapOpen ? "opacity-100 scale-100 translate-y-0 pointer-events-auto" : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
+            )}>
+              <div className={clsx("p-3 border-b text-[10px] font-bold uppercase tracking-widest flex items-center justify-between", isDark ? "bg-slate-800/80 border-slate-700/60 text-slate-400" : "bg-gray-50/80 border-gray-100 text-gray-400")}>
+                <span>Select Basemap Layer</span>
+                <span className={clsx("px-1.5 py-0.5 rounded text-[9px]", isDark ? "bg-blue-950/60 text-blue-400 border border-blue-800/40" : "bg-blue-100 text-blue-600")}>{BASEMAPS.length} Maps</span>
+              </div>
+              
+              <div className="max-h-[calc(100vh-200px)] overflow-y-auto p-2">
+                <div className="grid grid-cols-2 gap-2">
+                  {BASEMAPS.map((map) => (
+                    <button
+                      key={map.id}
+                      onClick={() => {
+                        setActiveBasemap(map.id);
+                        setIsBasemapOpen(false);
+                      }}
+                      className={clsx(
+                        "group relative flex flex-col items-start overflow-hidden rounded-lg border transition-all duration-200",
+                        activeBasemap === map.id 
+                          ? "border-blue-500 ring-2 ring-blue-500/20 shadow-md" 
+                          : isDark ? "border-slate-700 hover:border-slate-600 bg-slate-800/80" : "border-gray-200 hover:border-gray-300 hover:shadow-sm bg-white"
+                      )}
+                    >
+                      {/* Preview Image */}
+                      <div className={clsx("w-full h-20 relative overflow-hidden", isDark ? "bg-slate-800" : "bg-gray-100")}>
+                        {map.preview ? (
+                          <img 
+                            src={map.preview} 
+                            alt={map.name} 
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className={clsx("w-full h-full flex items-center justify-center", isDark ? "text-slate-600" : "text-gray-300")}>
+                            <MapIcon size={24} />
+                          </div>
+                        )}
+                        
+                        {/* Active Indicator Overlay */}
+                        {activeBasemap === map.id && (
+                          <div className="absolute inset-0 bg-blue-600/10 flex items-center justify-center">
+                            <div className="bg-blue-600 text-white p-1 rounded-full shadow-sm">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Label */}
+                      <div className={clsx("w-full p-2 backdrop-blur-sm border-t text-xs font-bold", isDark ? "bg-slate-900/90 border-slate-700/60 text-slate-200" : "bg-white/90 border-gray-100/50 text-gray-800")}>
+                        {map.name}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const layers = [
+    { name: 'panotrack', title: 'Panotrack (360 Views)' }
+  ];
 
   const toggleLayer = (layerName) => {
     if (activeLayers.includes(layerName)) {

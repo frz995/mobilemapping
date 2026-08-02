@@ -310,7 +310,7 @@ const MapResizer = ({ resizeTrigger }) => {
 };
 
 // --- Search Component ---
-const SearchBar = ({ isViewerOpen }) => {
+const SearchBar = ({ isViewerOpen, isEmbed = false }) => {
   const map = useMap();
   const { isDark } = useTheme();
   const [query, setQuery] = useState('');
@@ -318,8 +318,8 @@ const SearchBar = ({ isViewerOpen }) => {
   const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef(null);
 
-  // Calculate right margin based on viewer state.
-  const rightMargin = !isViewerOpen ? '200px' : '10px';
+  // Calculate right margin based on viewer/embed state.
+  const rightMargin = isEmbed ? '60px' : (!isViewerOpen ? '200px' : '10px');
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
@@ -797,7 +797,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
         </div>
       )}
 
-      {!isEmbed && <SearchBar isViewerOpen={isViewerOpen} />}
+      <SearchBar isViewerOpen={isViewerOpen} isEmbed={isEmbed} />
       <BaseLayerRenderer activeBasemap={activeBasemap} />
       {!isEmbed && <MiniMap />}
       <CoordinateDisplay />
