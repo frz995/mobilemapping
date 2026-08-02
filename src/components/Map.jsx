@@ -275,10 +275,13 @@ const MapZoomHandler = ({ trigger, filteredPoints }) => {
   const map = useMap();
 
   useEffect(() => {
-    if (trigger > 0 && filteredPoints && filteredPoints.length > 0) {
-      const points = filteredPoints.map(p => [p.lat, p.lon]);
-      if (points.length > 0) {
-        const bounds = L.latLngBounds(points);
+    if (filteredPoints && filteredPoints.length > 0) {
+      const validPoints = filteredPoints
+        .filter(p => p && !isNaN(p.lat) && !isNaN(p.lon))
+        .map(p => [p.lat, p.lon]);
+
+      if (validPoints.length > 0) {
+        const bounds = L.latLngBounds(validPoints);
         if (bounds.isValid()) {
           map.fitBounds(bounds, { padding: [50, 50], maxZoom: 18 });
         }
