@@ -562,6 +562,21 @@ const SelectedMarker = ({ point, viewState }) => {
   );
 };
 
+// --- Map Fly To Event Listener ---
+const MapFlyToListener = () => {
+  const map = useMap();
+  useEffect(() => {
+    const handleFly = (e) => {
+      if (e.detail && e.detail.lat !== undefined && e.detail.lon !== undefined) {
+        map.flyTo([e.detail.lat, e.detail.lon], 16);
+      }
+    };
+    window.addEventListener('map-fly-to', handleFly);
+    return () => window.removeEventListener('map-fly-to', handleFly);
+  }, [map]);
+  return null;
+};
+
 // --- Mini Map Component ---
 const MiniMapUpdater = ({ parentCenter, parentZoom }) => {
   const miniMap = useMap();
@@ -797,7 +812,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
         </div>
       )}
 
-      <SearchBar isViewerOpen={isViewerOpen} isEmbed={isEmbed} />
+      <MapFlyToListener />
       <BaseLayerRenderer activeBasemap={activeBasemap} />
       {!isEmbed && <MiniMap />}
       <CoordinateDisplay />

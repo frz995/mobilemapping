@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Upload, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight, LogOut, Sun, Moon } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Upload, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight, LogOut, Sun, Moon, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { BASEMAPS } from '../config/basemaps';
 import { useTheme } from '../context/ThemeContext';
@@ -21,13 +21,109 @@ const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers,
   const [isToolboxOpen, setIsToolboxOpen] = useState(false);
   const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchInputRef = useRef(null);
   const { isDark, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    if (isSearchOpen && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [isSearchOpen]);
+
+  const handleSearchSubmit = async (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setSearchLoading(true);
+    const coords = searchQuery.split(',').map(n => parseFloat(n.trim()));
+    if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+      window.dispatchEvent(new CustomEvent('map-fly-to', { detail: { lat: coords[0], lon: coords[1] } }));
+      setSearchLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}`);
+      const data = await response.json();
+      if (data && data.length > 0) {
+        window.dispatchEvent(new CustomEvent('map-fly-to', { detail: { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) } }));
+      } else {
+        alert('Location not found');
+      }
+    } catch (err) {
+      console.error('Search error:', err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
 
   if (isEmbed) {
     return (
       <div className="fixed inset-0 pointer-events-none z-[9000]">
-        {/* Top Right: Basemap Switcher Only */}
+        {/* Top Right: Search Bar + Basemap Switcher Perfectly Aligned */}
         <div className="absolute top-4 right-4 pointer-events-auto z-[2000] flex items-center gap-2">
+          
+          {/* Search Bar Form */}
+          <form
+            onSubmit={handleSearchSubmit}
+            className={clsx(
+              "flex items-center backdrop-blur-md rounded-xl shadow-md border overflow-hidden transition-all duration-300 h-10",
+              isDark
+                ? "bg-slate-900/90 border-slate-700/70 text-slate-100 shadow-slate-950/50"
+                : "bg-white/90 border-gray-200/50 text-gray-800 shadow-sm",
+              isSearchOpen ? "w-56 sm:w-72 px-1" : "w-10 px-0"
+            )}
+          >
+            {isSearchOpen && (
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search location or lat,lon..."
+                className={clsx(
+                  "flex-1 px-3 py-2 text-xs sm:text-sm bg-transparent focus:outline-none min-w-0 transition-all",
+                  isDark ? "text-slate-100 placeholder-slate-400" : "text-gray-700 placeholder-gray-400"
+                )}
+              />
+            )}
+
+            {isSearchOpen && searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className={clsx("p-1.5 rounded-lg transition-colors shrink-0", isDark ? "text-slate-400 hover:text-slate-200" : "text-gray-400 hover:text-gray-600")}
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
+
+            <button
+              type={isSearchOpen && searchQuery.trim() ? "submit" : "button"}
+              onClick={() => {
+                if (!isSearchOpen) {
+                  setIsSearchOpen(true);
+                } else if (!searchQuery.trim()) {
+                  setIsSearchOpen(false);
+                }
+              }}
+              className={clsx(
+                "h-10 w-10 transition-colors flex items-center justify-center shrink-0 rounded-xl",
+                isDark
+                  ? "text-blue-400 hover:text-blue-300 hover:bg-slate-800/80"
+                  : "text-blue-600 hover:text-blue-800 hover:bg-slate-100/60"
+              )}
+              title="Search Map"
+            >
+              <Search size={18} />
+            </button>
+          </form>
+
+          {/* Basemap Switcher Button */}
           <div className="relative">
             <button
               onClick={() => setIsBasemapOpen(!isBasemapOpen)}
