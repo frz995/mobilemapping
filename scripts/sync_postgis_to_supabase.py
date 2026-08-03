@@ -8,15 +8,15 @@ from datetime import datetime, timezone
 # CONFIGURATION
 # ==========================================
 LOCAL_DB_CONFIG = {
-    "dbname": "360web",    # Replace with your local database name
-    "user": "postgres",                # Replace with your postgres username
-    "password": "Skrillex95!", # Replace with your postgres password
-    "host": "localhost",
-    "port": "5432"
+    "dbname": os.getenv("DB_NAME", "360web"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD", "YOUR_LOCAL_PASSWORD"),
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432")
 }
 
-SUPABASE_URL = "https://tqqybumedywzylujjkqa.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxcXlidW1lZHl3enlsdWpqa3FhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTM0NzU5MCwiZXhwIjoyMTAwOTIzNTkwfQ.hd6SjFHUvUK7889eTi_apzoijNT4cNOT7u9F2blAibs" # Replace with service role key
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tqqybumedywzylujjkqa.supabase.co")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "YOUR_SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_TABLE = "panoramas"
 
 # File name used to store the last sync timestamp
@@ -72,7 +72,7 @@ def run_full_sync():
     current_run_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S%z")
 
     try:
-        print("🔌 Connecting to local PostGIS database...")
+        print("Connecting to local PostGIS database...")
         conn = psycopg2.connect(**LOCAL_DB_CONFIG)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -81,11 +81,11 @@ def run_full_sync():
         local_ids = set(row["id"] for row in cursor.fetchall())
 
         # Fetch all active IDs in Supabase
-        print("🔍 Querying Supabase record IDs...")
+        print("Querying Supabase record IDs...")
         supabase_ids = fetch_all_supabase_ids()
 
-        print(f"📊 Total Local PostGIS Rows: {len(local_ids)}")
-        print(f"📊 Total Supabase Rows:     {len(supabase_ids)}")
+        print(f"Total Local PostGIS Rows: {len(local_ids)}")
+        print(f"Total Supabase Rows:     {len(supabase_ids)}")
 
         # -------------------------------------------------------------
         # LOGIC 1: RECONCILE DIFFERENCES & SYNC DELETIONS
@@ -95,24 +95,24 @@ def run_full_sync():
         # 1A. Items deleted locally in PostGIS but present on Supabase
         ids_to_delete = list(supabase_ids - local_ids)
         if ids_to_delete:
-            print(f"🗑️ Found {len(ids_to_delete)} deleted record(s) in local PostGIS. Removing from Supabase...")
+            print(f"Found {len(ids_to_delete)} deleted record(s) in local PostGIS. Removing from Supabase...")
             for i in range(0, len(ids_to_delete), 500):
                 batch = ids_to_delete[i:i + 500]
                 supabase.table(SUPABASE_TABLE).delete().in_("id", batch).execute()
-            print(f"✅ Successfully deleted {len(ids_to_delete)} record(s) from Supabase.")
+            print(f"Successfully deleted {len(ids_to_delete)} record(s) from Supabase.")
         else:
-            print("✨ No local deletions to mirror.")
+            print("No local deletions to mirror.")
 
         # 1B. Items missing from Supabase but existing locally
         missing_in_supabase = list(local_ids - supabase_ids)
         if missing_in_supabase:
-            print(f"⚠️ Found {len(missing_in_supabase)} record(s) missing from Supabase. Flagged for updated!")
+            print(f"Found {len(missing_in_supabase)} record(s) missing from Supabase. Flagged for update!")
 
         # -------------------------------------------------------------
         # LOGIC 2: SYNC LATEST UPDATED METADATA & MISSING ROWS
         # -------------------------------------------------------------
         print("\n--- syncing: Incremental Delta & Restore Sync ---")
-        print(f"🔍 Fetching changes updated since: {last_sync}")
+        print(f"Fetching changes updated since: {last_sync}")
 
         # Fetch rows updated after last_sync OR rows missing in Supabase
         query = """
@@ -132,7 +132,7 @@ def run_full_sync():
         rows = cursor.fetchall()
 
         if rows:
-            print(f"⚡ Found {len(rows)} record(s) to insert/update on Supabase...")
+            print(f"Found {len(rows)} record(s) to insert/update on Supabase...")
 
             records_to_sync = []
             for row in rows:
@@ -154,19 +154,19 @@ def run_full_sync():
                 batch = records_to_sync[i:i + 500]
                 supabase.table(SUPABASE_TABLE).upsert(batch, on_conflict="id").execute()
 
-            print(f"✅ Upsert successful for {len(records_to_sync)} record(s)!")
+            print(f"Upsert successful for {len(records_to_sync)} record(s)!")
         else:
-            print("✨ No updated or missing records found.")
+            print("No updated or missing records found.")
 
         # Save latest sync time
         save_current_sync_time(current_run_time)
 
         cursor.close()
         conn.close()
-        print("\n🚀 Full Sync Complete!")
+        print("\nFull Sync Complete!")
 
     except Exception as e:
-        print(f"❌ Sync failed: {e}")
+        print(f"Sync failed: {e}")
 
 
 if __name__ == "__main__":

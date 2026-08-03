@@ -21,6 +21,57 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
+// Custom animated DivIcon marker for blinking selected panotrack subgrid points
+const createBlinkingSubgridIcon = () => {
+  return L.divIcon({
+    className: 'panotrack-blinking-div-icon',
+    html: `
+      <div style="position: relative; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+        <style>
+          @keyframes panotrackPing {
+            0% { transform: scale(0.5); opacity: 1; }
+            75%, 100% { transform: scale(2.2); opacity: 0; }
+          }
+          @keyframes panotrackPulse {
+            0%, 100% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.4); opacity: 0.3; }
+          }
+        </style>
+        <div style="
+          position: absolute;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background-color: rgba(0, 242, 255, 0.5);
+          border: 2px solid #00f2ff;
+          box-shadow: 0 0 15px #00f2ff;
+          animation: panotrackPing 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+        "></div>
+        <div style="
+          position: absolute;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background-color: rgba(2, 132, 199, 0.7);
+          border: 2px solid #ffffff;
+          animation: panotrackPulse 1.5s ease-in-out infinite;
+        "></div>
+        <div style="
+          position: relative;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background-color: #00f2ff;
+          border: 2.5px solid #ffffff;
+          box-shadow: 0 0 10px #00f2ff, 0 0 20px #00f2ff;
+        "></div>
+      </div>
+    `,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20]
+  });
+};
+
 import { BASEMAPS } from '../config/basemaps';
 
 // --- Coordinate Popup Component ---
@@ -437,8 +488,9 @@ const SearchBar = ({ isViewerOpen, isEmbed = false }) => {
 
 // --- Points Layer (Unselected Points) ---
 // Memoized to prevent re-renders when viewState (yaw) changes
-const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filterDate, onPointSelect, selectedPointId, readonly = false }) => {
+const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filterDate, filterSubgrid, onPointSelect, selectedPointId, readonly = false }) => {
   if (!activeLayers || !activeLayers.includes('panotrack')) return null;
+  const isFiltered = Boolean(filterSubgrid && filterSubgrid.trim() !== '');
 
   return points.map((point) => {
     // Skip the selected point (it's rendered by SelectedMarker)
@@ -457,6 +509,24 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
           fillColor = '#ef4444'; // red-500
         }
       }
+    }
+
+    if (isFiltered) {
+      return (
+        <Marker
+          key={`blinking-${point.id}`}
+          position={[point.lat, point.lon]}
+          icon={createBlinkingSubgridIcon()}
+          eventHandlers={readonly ? {} : {
+            click: (e) => {
+              if (e.originalEvent) {
+                L.DomEvent.stopPropagation(e.originalEvent);
+              }
+              onPointSelect(point);
+            },
+          }}
+        />
+      );
     }
 
     return (
@@ -488,6 +558,7 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
     prevProps.selectedPointId === nextProps.selectedPointId &&
     prevProps.filterColorByDate === nextProps.filterColorByDate &&
     prevProps.filterDate === nextProps.filterDate &&
+    prevProps.filterSubgrid === nextProps.filterSubgrid &&
     prevProps.activeLayers === nextProps.activeLayers &&
     prevProps.readonly === nextProps.readonly &&
     prevProps.onPointSelect === nextProps.onPointSelect
@@ -578,6 +649,34 @@ const MapFlyToListener = () => {
     window.addEventListener('map-fly-to', handleFly);
     return () => window.removeEventListener('map-fly-to', handleFly);
   }, [map]);
+  return null;
+};
+
+// --- Map Bounds Listener (Zoom to data extent when subgrid filter is active) ---
+const MapBoundsListener = ({ filteredPoints, filterSubgrid }) => {
+  const map = useMap();
+  const prevFilterRef = useRef(null);
+
+  useEffect(() => {
+    if (filterSubgrid && filterSubgrid.trim() !== '' && filteredPoints && filteredPoints.length > 0) {
+      if (prevFilterRef.current !== filterSubgrid) {
+        prevFilterRef.current = filterSubgrid;
+        const validCoords = filteredPoints
+          .map(p => [Number(p.lat), Number(p.lon)])
+          .filter(c => !isNaN(c[0]) && !isNaN(c[1]) && c[0] !== 0 && c[1] !== 0);
+
+        if (validCoords.length > 0) {
+          const bounds = L.latLngBounds(validCoords);
+          if (bounds.isValid()) {
+            map.flyToBounds(bounds, { padding: [50, 50], maxZoom: 18, duration: 1.5 });
+          }
+        }
+      }
+    } else if (!filterSubgrid) {
+      prevFilterRef.current = null;
+    }
+  }, [filterSubgrid, filteredPoints, map]);
+
   return null;
 };
 
@@ -824,6 +923,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
       )}
 
       <MapFlyToListener />
+      <MapBoundsListener filteredPoints={filteredPoints} filterSubgrid={filterSubgrid} />
       <BaseLayerRenderer activeBasemap={activeBasemap} />
       {!isEmbed && <MiniMap />}
       <CoordinateDisplay isEmbed={isEmbed} />
@@ -846,6 +946,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
         activeLayers={activeLayers}
         filterColorByDate={filterColorByDate}
         filterDate={filterDate}
+        filterSubgrid={filterSubgrid}
         onPointSelect={onPointSelect}
         selectedPointId={selectedPoint?.id}
         readonly={isEmbed}

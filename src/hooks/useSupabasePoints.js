@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 
+function extractSubgrid(text) {
+  if (!text) return '';
+  const match = String(text).match(/N\d{2,3}E\d{2,3}/i);
+  return match ? match[0].toUpperCase() : '';
+}
+
 const SAMPLE_PANOTRACK_POINTS = [
   { id: 1, subgrid: 'N94E70', filename: 'N94E70-0001.jpg', lat: 2.542421, lon: 102.8077, image_url: 'https://pannellum.org/images/alma.jpg', heading: 255.8, captured_at: '2026-06-20T10:05:00Z' },
   { id: 2, subgrid: 'N93E70', filename: 'N93E70-0001.jpg', lat: 2.542429, lon: 102.8078, image_url: 'https://pannellum.org/images/cerro-toco-0.jpg', heading: 255.7, captured_at: '2026-06-21T15:40:00Z' },
@@ -31,14 +37,18 @@ export function useSupabasePoints() {
                     console.warn('Supabase returned no panotrack points, using default panotrack dataset.');
                     setPoints(SAMPLE_PANOTRACK_POINTS);
                 } else {
-                    const formattedPoints = data.map(item => ({
-                        ...item,
-                        lon: item.longitude ?? item.lon,
-                        lat: item.latitude ?? item.lat,
-                        image_url: item.image_url?.startsWith('http')
-                            ? item.image_url
-                            : `${import.meta.env.VITE_IMAGE_BASE_URL || ''}${item.image_url || item.filename}`
-                    }));
+                    const formattedPoints = data.map(item => {
+                        const rawSubgrid = item.subgrid || extractSubgrid(item.filename || item.image_url || item.description);
+                        return {
+                            ...item,
+                            subgrid: (rawSubgrid || 'UNKNOWN').toUpperCase(),
+                            lon: item.longitude ?? item.lon,
+                            lat: item.latitude ?? item.lat,
+                            image_url: item.image_url?.startsWith('http')
+                                ? item.image_url
+                                : `${import.meta.env.VITE_IMAGE_BASE_URL || ''}${item.image_url || item.filename}`
+                        };
+                    });
                     setPoints(formattedPoints);
                 }
             } catch (err) {

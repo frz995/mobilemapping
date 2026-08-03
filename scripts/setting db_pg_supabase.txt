@@ -1,4 +1,4 @@
 this method is to set database to supabase and can monitor at supabase workspace
 1.Run this in powershell
-"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -h localhost -U postgres -d 360web | & "C:\Program Files\PostgreSQL\18\bin\psql.exe" "postgresql://postgres:Skrillex95!@db.tqqybumedywzylujjkqa.supabase.co:5432/postgres" 
+"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -h localhost -U postgres -d 360web | & "C:\Program Files\PostgreSQL\18\bin\psql.exe" "postgresql://postgres:<YOUR_SUPABASE_DB_PASSWORD>@db.tqqybumedywzylujjkqa.supabase.co:5432/postgres" 
 2. verify database in editor

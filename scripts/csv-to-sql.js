@@ -6,11 +6,11 @@ import { exec } from 'child_process';
 
 // --- DATABASE CONFIGURATION ---
 const DB_CONFIG = {
-  user: 'postgres',
-  host: 'localhost',
-  database: '360web', // Ensure this matches your PostGIS database name
-  password: 'Skrillex95!',
-  port: 5432,
+  user: process.env.DB_USER || 'postgres',
+  host: process.env.DB_HOST || 'localhost',
+  database: process.env.DB_NAME || '360web', // Ensure this matches your PostGIS database name
+  password: process.env.DB_PASSWORD || 'YOUR_LOCAL_PASSWORD',
+  port: process.env.DB_PORT || 5432,
 };
 // ------------------------------
 

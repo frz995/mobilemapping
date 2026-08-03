@@ -100,7 +100,13 @@ const Layout = ({ isEmbed = false }) => {
       // 1. Subgrid Filter
       if (filterSubgrid && filterSubgrid.trim() !== '') {
         const searchTerms = filterSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(s => s);
-        const pointSubgrid = (point.subgrid || '').toLowerCase();
+        const pointSubgrid = (
+          point.subgrid ||
+          (point.filename ? point.filename.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
+          (point.image_url ? point.image_url.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
+          (point.description ? point.description.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
+          ''
+        ).toLowerCase();
 
         if (searchTerms.length > 0) {
           const matches = searchTerms.some(term => pointSubgrid.includes(term));

@@ -16,8 +16,9 @@ class PostGISSupabaseSyncPlugin:
             "host": "localhost",
             "port": "5432"
         }
-        self.supabase_url = "https://tqqybumedywzylujjkqa.supabase.co"
-        self.service_role_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxcXlidW1lZHl3enlsdWpqa3FhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTM0NzU5MCwiZXhwIjoyMTAwOTIzNTkwfQ.hd6SjFHUvUK7889eTi_apzoijNT4cNOT7u9F2blAibs"
+        import os
+        self.supabase_url = os.getenv("SUPABASE_URL", "https://tqqybumedywzylujjkqa.supabase.co")
+        self.service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "YOUR_SUPABASE_SERVICE_ROLE_KEY")
         self.table_name = "panoramas"
 
     def initGui(self):
