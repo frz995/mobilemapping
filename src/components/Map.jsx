@@ -437,7 +437,7 @@ const SearchBar = ({ isViewerOpen, isEmbed = false }) => {
 
 // --- Points Layer (Unselected Points) ---
 // Memoized to prevent re-renders when viewState (yaw) changes
-const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filterDate, onPointSelect, selectedPointId }) => {
+const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filterDate, onPointSelect, selectedPointId, readonly = false }) => {
   if (!activeLayers || !activeLayers.includes('panotrack')) return null;
 
   return points.map((point) => {
@@ -469,9 +469,9 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
         weight={2}
         opacity={1}
         fillOpacity={1}
-        eventHandlers={{
+        // Disable click interaction in readonly/embed mode
+        eventHandlers={readonly ? {} : {
           click: (e) => {
-            // Stop propagation to prevent map click
             if (e.originalEvent) {
               L.DomEvent.stopPropagation(e.originalEvent);
             }
@@ -489,6 +489,7 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
     prevProps.filterColorByDate === nextProps.filterColorByDate &&
     prevProps.filterDate === nextProps.filterDate &&
     prevProps.activeLayers === nextProps.activeLayers &&
+    prevProps.readonly === nextProps.readonly &&
     prevProps.onPointSelect === nextProps.onPointSelect
   );
 });
@@ -847,6 +848,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
         filterDate={filterDate}
         onPointSelect={onPointSelect}
         selectedPointId={selectedPoint?.id}
+        readonly={isEmbed}
       />
 
       {activeLayers && activeLayers.includes('panotrack') && selectedPoint && (
