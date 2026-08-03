@@ -818,7 +818,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
       <MapFlyToListener />
       <BaseLayerRenderer activeBasemap={activeBasemap} />
       {!isEmbed && <MiniMap />}
-      <CoordinateDisplay />
+      {!isEmbed && <CoordinateDisplay />}
 
       {qgisWmsUrl && activeLayers && activeLayers.map((name) => (
         name !== 'panotrack' && (
