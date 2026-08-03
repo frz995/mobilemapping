@@ -13,10 +13,10 @@ import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
 let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41]
+  iconUrl: icon,
+  shadowUrl: iconShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41]
 });
 
 L.Marker.prototype.options.icon = DefaultIcon;
@@ -41,17 +41,17 @@ const CoordinatePopup = ({ latlng, onClose }) => {
   };
 
   const point = L.CRS.EPSG3857.project(latlng);
-  
+
   // Calculate UTM
   const zone = Math.floor((lng + 180) / 6) + 1;
   const hemisphere = lat >= 0 ? 'north' : 'south';
   let utmCoords = null;
   try {
-      const utmDef = `+proj=utm +zone=${zone} +${hemisphere} +datum=WGS84 +units=m +no_defs`;
-      const result = proj4('EPSG:4326', utmDef, [lng, lat]);
-      utmCoords = { x: result[0], y: result[1], zone: zone, hemi: lat >= 0 ? 'N' : 'S' };
+    const utmDef = `+proj=utm +zone=${zone} +${hemisphere} +datum=WGS84 +units=m +no_defs`;
+    const result = proj4('EPSG:4326', utmDef, [lng, lat]);
+    utmCoords = { x: result[0], y: result[1], zone: zone, hemi: lat >= 0 ? 'N' : 'S' };
   } catch (e) {
-      console.warn("UTM calc error", e);
+    console.warn("UTM calc error", e);
   }
 
   const handleCopy = (text, type) => {
@@ -68,7 +68,7 @@ const CoordinatePopup = ({ latlng, onClose }) => {
       if (data && data.results && data.results[0]) {
         setElevation(data.results[0].elevation);
       } else {
-         setElevation("N/A");
+        setElevation("N/A");
       }
     } catch (e) {
       console.error("Elevation fetch failed", e);
@@ -80,97 +80,97 @@ const CoordinatePopup = ({ latlng, onClose }) => {
 
   return (
     <Popup position={latlng} onClose={onClose}>
-       <div className="font-sans text-sm min-w-[220px] p-1">
-         <h3 className="font-bold border-b border-gray-200 mb-2 pb-1 text-gray-800">Coordinates & Height</h3>
-         
-         {/* Decimal Degrees */}
-         <div className="mb-2">
-            <div className="flex justify-between items-center mb-0.5">
-                <span className="text-gray-500 text-[10px] uppercase font-semibold">Decimal</span>
-                <button 
-                  onClick={() => handleCopy(`${lat.toFixed(6)}, ${lng.toFixed(6)}`, 'dd')} 
-                  className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
-                >
-                   {copyStatus === 'dd' ? <Check size={10} /> : <Copy size={10} />}
-                   {copyStatus === 'dd' ? 'Copied' : 'Copy'}
-                </button>
-            </div>
-            <div className="font-mono text-xs bg-gray-50 p-1.5 rounded border border-gray-100 text-gray-700">
-                {lat.toFixed(6)}, {lng.toFixed(6)}
-            </div>
-         </div>
+      <div className="font-sans text-sm min-w-[220px] p-1">
+        <h3 className="font-bold border-b border-gray-200 mb-2 pb-1 text-gray-800">Coordinates & Height</h3>
 
-         {/* DMS */}
-         <div className="mb-2">
+        {/* Decimal Degrees */}
+        <div className="mb-2">
+          <div className="flex justify-between items-center mb-0.5">
+            <span className="text-gray-500 text-[10px] uppercase font-semibold">Decimal</span>
+            <button
+              onClick={() => handleCopy(`${lat.toFixed(6)}, ${lng.toFixed(6)}`, 'dd')}
+              className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
+            >
+              {copyStatus === 'dd' ? <Check size={10} /> : <Copy size={10} />}
+              {copyStatus === 'dd' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <div className="font-mono text-xs bg-gray-50 p-1.5 rounded border border-gray-100 text-gray-700">
+            {lat.toFixed(6)}, {lng.toFixed(6)}
+          </div>
+        </div>
+
+        {/* DMS */}
+        <div className="mb-2">
+          <div className="flex justify-between items-center mb-0.5">
+            <span className="text-gray-500 text-[10px] uppercase font-semibold">DMS</span>
+            <button
+              onClick={() => handleCopy(`${toDMS(lat, 'lat')} ${toDMS(lng, 'lng')}`, 'dms')}
+              className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
+            >
+              {copyStatus === 'dms' ? <Check size={10} /> : <Copy size={10} />}
+              {copyStatus === 'dms' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <div className="font-mono text-xs bg-gray-50 p-1.5 rounded border border-gray-100 text-gray-700 leading-tight">
+            {toDMS(lat, 'lat')}<br />{toDMS(lng, 'lng')}
+          </div>
+        </div>
+
+        {/* Mercator */}
+        <div className="mb-2">
+          <div className="flex justify-between items-center mb-0.5">
+            <span className="text-gray-500 text-[10px] uppercase font-semibold">Mercator (EPSG:3857)</span>
+            <button
+              onClick={() => handleCopy(`${point.x.toFixed(2)}, ${point.y.toFixed(2)}`, 'merc')}
+              className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
+            >
+              {copyStatus === 'merc' ? <Check size={10} /> : <Copy size={10} />}
+              {copyStatus === 'merc' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <div className="font-mono text-xs bg-gray-50 p-1.5 rounded border border-gray-100 text-gray-700 leading-tight">
+            X: {point.x.toFixed(2)}<br />Y: {point.y.toFixed(2)}
+          </div>
+        </div>
+
+        {/* UTM */}
+        {utmCoords && (
+          <div className="mb-2">
             <div className="flex justify-between items-center mb-0.5">
-                <span className="text-gray-500 text-[10px] uppercase font-semibold">DMS</span>
-                 <button 
-                   onClick={() => handleCopy(`${toDMS(lat, 'lat')} ${toDMS(lng, 'lng')}`, 'dms')} 
-                   className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
-                 >
-                   {copyStatus === 'dms' ? <Check size={10} /> : <Copy size={10} />}
-                   {copyStatus === 'dms' ? 'Copied' : 'Copy'}
-                </button>
+              <span className="text-gray-500 text-[10px] uppercase font-semibold">UTM Zone {utmCoords.zone}{utmCoords.hemi}</span>
+              <button
+                onClick={() => handleCopy(`${utmCoords.x.toFixed(2)}, ${utmCoords.y.toFixed(2)}`, 'utm')}
+                className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
+              >
+                {copyStatus === 'utm' ? <Check size={10} /> : <Copy size={10} />}
+                {copyStatus === 'utm' ? 'Copied' : 'Copy'}
+              </button>
             </div>
             <div className="font-mono text-xs bg-gray-50 p-1.5 rounded border border-gray-100 text-gray-700 leading-tight">
-                {toDMS(lat, 'lat')}<br/>{toDMS(lng, 'lng')}
+              E: {utmCoords.x.toFixed(2)}<br />N: {utmCoords.y.toFixed(2)}
             </div>
-         </div>
+          </div>
+        )}
 
-         {/* Mercator */}
-         <div className="mb-2">
-            <div className="flex justify-between items-center mb-0.5">
-                <span className="text-gray-500 text-[10px] uppercase font-semibold">Mercator (EPSG:3857)</span>
-                 <button 
-                   onClick={() => handleCopy(`${point.x.toFixed(2)}, ${point.y.toFixed(2)}`, 'merc')} 
-                   className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
-                 >
-                   {copyStatus === 'merc' ? <Check size={10} /> : <Copy size={10} />}
-                   {copyStatus === 'merc' ? 'Copied' : 'Copy'}
-                </button>
-            </div>
-            <div className="font-mono text-xs bg-gray-50 p-1.5 rounded border border-gray-100 text-gray-700 leading-tight">
-                X: {point.x.toFixed(2)}<br/>Y: {point.y.toFixed(2)}
-            </div>
-         </div>
-
-         {/* UTM */}
-         {utmCoords && (
-             <div className="mb-2">
-                <div className="flex justify-between items-center mb-0.5">
-                    <span className="text-gray-500 text-[10px] uppercase font-semibold">UTM Zone {utmCoords.zone}{utmCoords.hemi}</span>
-                     <button 
-                       onClick={() => handleCopy(`${utmCoords.x.toFixed(2)}, ${utmCoords.y.toFixed(2)}`, 'utm')} 
-                       className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px]"
-                     >
-                       {copyStatus === 'utm' ? <Check size={10} /> : <Copy size={10} />}
-                       {copyStatus === 'utm' ? 'Copied' : 'Copy'}
-                    </button>
-                </div>
-                <div className="font-mono text-xs bg-gray-50 p-1.5 rounded border border-gray-100 text-gray-700 leading-tight">
-                    E: {utmCoords.x.toFixed(2)}<br/>N: {utmCoords.y.toFixed(2)}
-                </div>
-             </div>
-         )}
-
-         {/* Elevation */}
-         <div className="border-t border-gray-200 pt-2 mt-2">
-            <div className="flex justify-between items-center">
-               <span className="text-gray-500 text-[10px] uppercase font-semibold">Elevation</span>
-               {elevation === null ? (
-                 <button 
-                   onClick={fetchElevation} 
-                   disabled={loading} 
-                   className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 disabled:opacity-50 font-medium transition-colors"
-                 >
-                    {loading ? 'Loading...' : 'Get Height'}
-                 </button>
-               ) : (
-                 <span className="font-mono font-bold text-green-600 text-sm">{typeof elevation === 'number' ? `${Math.round(elevation)} m` : elevation}</span>
-               )}
-            </div>
-         </div>
-       </div>
+        {/* Elevation */}
+        <div className="border-t border-gray-200 pt-2 mt-2">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-500 text-[10px] uppercase font-semibold">Elevation</span>
+            {elevation === null ? (
+              <button
+                onClick={fetchElevation}
+                disabled={loading}
+                className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 disabled:opacity-50 font-medium transition-colors"
+              >
+                {loading ? 'Loading...' : 'Get Height'}
+              </button>
+            ) : (
+              <span className="font-mono font-bold text-green-600 text-sm">{typeof elevation === 'number' ? `${Math.round(elevation)} m` : elevation}</span>
+            )}
+          </div>
+        </div>
+      </div>
     </Popup>
   );
 };
@@ -178,18 +178,18 @@ const CoordinatePopup = ({ latlng, onClose }) => {
 // --- Map Interaction Tools ---
 const MapTools = ({ activeTool, onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish, onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick }) => {
   const map = useMap();
-  
+
   // Use refs to hold the latest callbacks to avoid re-binding event listeners on every render
   const callbacksRef = useRef({
-      onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish, 
-      onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick
+    onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish,
+    onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick
   });
 
   useEffect(() => {
-      callbacksRef.current = {
-          onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish, 
-          onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick
-      };
+    callbacksRef.current = {
+      onMeasureClick, onExtractClick, onIdentifyClick, onMeasureFinish,
+      onPolygonClick, onPolygonFinish, onBufferClick, onCoordinateClick
+    };
   });
 
   useEffect(() => {
@@ -198,7 +198,7 @@ const MapTools = ({ activeTool, onMeasureClick, onExtractClick, onIdentifyClick,
     const handleClick = (e) => {
       // console.log('Map Clicked:', e.latlng, 'Active Tool:', activeTool);
       const cbs = callbacksRef.current;
-      
+
       if (activeTool === 'measure') {
         cbs.onMeasureClick && cbs.onMeasureClick(e.latlng);
       } else if (activeTool === 'extract') {
@@ -253,7 +253,7 @@ const MapUpdater = ({ selectedPoint }) => {
       // Pad bounds by 5% to check visibility
       const paddedBounds = bounds.pad(-0.05);
       const isVisible = paddedBounds.contains([lat, lon]);
-      
+
       const currentZoom = map.getZoom();
       // Only force zoom-in if we are too far out
       const shouldZoomIn = currentZoom < 17;
@@ -299,9 +299,9 @@ const MapResizer = ({ resizeTrigger }) => {
   useEffect(() => {
     const container = map.getContainer();
     const resizeObserver = new ResizeObserver(() => {
-       map.invalidateSize();
+      map.invalidateSize();
     });
-    
+
     resizeObserver.observe(container);
 
     return () => {
@@ -335,7 +335,7 @@ const SearchBar = ({ isViewerOpen, isEmbed = false }) => {
     if (!query.trim()) return;
 
     setLoading(true);
-    
+
     // Check if query is coordinates (lat,lon)
     const coords = query.split(',').map(n => parseFloat(n.trim()));
     if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
@@ -348,7 +348,7 @@ const SearchBar = ({ isViewerOpen, isEmbed = false }) => {
     try {
       const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
       const data = await response.json();
-      
+
       if (data && data.length > 0) {
         const { lat, lon } = data[0];
         map.flyTo([parseFloat(lat), parseFloat(lon)], 16);
@@ -366,8 +366,8 @@ const SearchBar = ({ isViewerOpen, isEmbed = false }) => {
   return (
     <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto', marginTop: '12px', marginRight: rightMargin, marginBottom: '10px', marginLeft: '10px', zIndex: 1000, transition: 'margin-right 0.3s ease' }}>
       <div className="relative flex items-center justify-end">
-        <form 
-          onSubmit={handleSearch} 
+        <form
+          onSubmit={handleSearch}
           className={clsx(
             "flex items-center backdrop-blur-md rounded-xl shadow-md border overflow-hidden transition-all duration-300 origin-right h-10",
             isDark
@@ -401,8 +401,8 @@ const SearchBar = ({ isViewerOpen, isEmbed = false }) => {
             </button>
           )}
 
-          <button 
-            type={isOpen && query.trim() ? "submit" : "button"} 
+          <button
+            type={isOpen && query.trim() ? "submit" : "button"}
             onClick={() => {
               if (!isOpen) {
                 setIsOpen(true);
@@ -446,22 +446,22 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
 
     // Determine color based on date filter
     let fillColor = '#22c55e'; // green-500
-    
+
     if (filterColorByDate && filterDate) {
-       const pointDate = new Date(point.captured_at);
-       const thresholdDate = new Date(filterDate);
-       
-       // If point date is valid and older than threshold -> Red
-       if (!isNaN(pointDate.getTime()) && !isNaN(thresholdDate.getTime())) {
-         if (pointDate < thresholdDate) {
-           fillColor = '#ef4444'; // red-500
-         }
-       }
+      const pointDate = new Date(point.captured_at);
+      const thresholdDate = new Date(filterDate);
+
+      // If point date is valid and older than threshold -> Red
+      if (!isNaN(pointDate.getTime()) && !isNaN(thresholdDate.getTime())) {
+        if (pointDate < thresholdDate) {
+          fillColor = '#ef4444'; // red-500
+        }
+      }
     }
-    
+
     return (
-      <CircleMarker 
-        key={point.id} 
+      <CircleMarker
+        key={point.id}
         center={[point.lat, point.lon]}
         radius={6}
         fillColor={fillColor}
@@ -471,11 +471,11 @@ const PointsLayer = React.memo(({ points, activeLayers, filterColorByDate, filte
         fillOpacity={1}
         eventHandlers={{
           click: (e) => {
-             // Stop propagation to prevent map click
-             if (e.originalEvent) {
-                 L.DomEvent.stopPropagation(e.originalEvent);
-             }
-             onPointSelect(point);
+            // Stop propagation to prevent map click
+            if (e.originalEvent) {
+              L.DomEvent.stopPropagation(e.originalEvent);
+            }
+            onPointSelect(point);
           },
         }}
       />
@@ -499,13 +499,13 @@ const SelectedMarker = ({ point, viewState }) => {
   if (!point) return null;
 
   const yaw = viewState?.yaw || 0;
-  
+
   // Memoize the icon to prevent unnecessary recreation which causes flashing
   // We use a stable ID in the HTML to update rotation via DOM instead of replacing the icon
   const icon = useMemo(() => {
-     return L.divIcon({
-       className: 'selected-marker-icon',
-       html: `
+    return L.divIcon({
+      className: 'selected-marker-icon',
+      html: `
          <div style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
            <!-- Cone (Rotated via JS) -->
            <div id="cone-rotator-${point.id}" style="
@@ -542,9 +542,9 @@ const SelectedMarker = ({ point, viewState }) => {
            </div>
          </div>
        `,
-       iconSize: [60, 60],
-       iconAnchor: [30, 30]
-     });
+      iconSize: [60, 60],
+      iconAnchor: [30, 30]
+    });
   }, [point.id]);
 
   // Update rotation directly via DOM to avoid Leaflet re-render thrashing
@@ -556,7 +556,7 @@ const SelectedMarker = ({ point, viewState }) => {
   }, [yaw, point.id]);
 
   return (
-    <Marker 
+    <Marker
       position={[point.lat, point.lon]}
       icon={icon}
       zIndexOffset={1000} // Keep on top
@@ -609,43 +609,50 @@ const MiniMap = React.memo(() => {
 
   // Calculate mini map zoom (clamped)
   const miniMapZoom = Math.max(0, zoom - 5);
-  
+
   return (
     <div className="leaflet-bottom leaflet-left" style={{ pointerEvents: 'auto', marginBottom: '24px', marginLeft: '24px', zIndex: 1000 }}>
-       <div className="w-48 h-36 rounded-2xl shadow-2xl border-4 border-white overflow-hidden relative group hover:scale-105 transition-transform duration-300 ring-1 ring-gray-900/10">
-         <MapContainer
-            center={center}
-            zoom={miniMapZoom}
-            zoomControl={false}
-            scrollWheelZoom={false}
-            doubleClickZoom={false}
-            dragging={false}
-            attributionControl={false}
-            style={{ width: '100%', height: '100%', background: '#f8fafc' }}
-         >
-            <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png" />
-            <MiniMapUpdater parentCenter={center} parentZoom={miniMapZoom} />
-            <Rectangle bounds={bounds} pathOptions={{ color: "#2563eb", weight: 2, fillOpacity: 0.1, dashArray: '4' }} />
-         </MapContainer>
-         
-         {/* Label Overlay */}
-         <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm z-[5501] border border-gray-200/50">
-            OVERVIEW
-         </div>
-       </div>
+      <div className="w-48 h-36 rounded-2xl shadow-2xl border-4 border-white overflow-hidden relative group hover:scale-105 transition-transform duration-300 ring-1 ring-gray-900/10">
+        <MapContainer
+          center={center}
+          zoom={miniMapZoom}
+          zoomControl={false}
+          scrollWheelZoom={false}
+          doubleClickZoom={false}
+          dragging={false}
+          attributionControl={false}
+          style={{ width: '100%', height: '100%', background: '#f8fafc' }}
+        >
+          <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png" />
+          <MiniMapUpdater parentCenter={center} parentZoom={miniMapZoom} />
+          <Rectangle bounds={bounds} pathOptions={{ color: "#2563eb", weight: 2, fillOpacity: 0.1, dashArray: '4' }} />
+        </MapContainer>
+
+        {/* Label Overlay */}
+        <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm z-[5501] border border-gray-200/50">
+          OVERVIEW
+        </div>
+      </div>
     </div>
   );
 });
 
 // --- Coordinate Display Component ---
-const CoordinateDisplay = () => {
+const CoordinateDisplay = ({ isEmbed = false }) => {
   const [coords, setCoords] = useState({ lat: 0, lng: 0 });
 
   useMapEvents({
     mousemove(e) {
-      setCoords(e.latlng);
+      const { lat, lng } = e.latlng;
+      setCoords({ lat, lng });
+      // Broadcast coords to parent dashboard when embedded
+      if (isEmbed && window.parent !== window) {
+        window.parent.postMessage({ type: 'MAP_COORDS', lat, lng }, '*');
+      }
     },
   });
+
+  if (isEmbed) return null;
 
   return (
     <div className="absolute bottom-1 right-12 z-[5500] bg-white/80 backdrop-blur-md px-2.5 py-0.5 rounded-full text-[9px] sm:text-xs font-mono text-gray-700 border border-gray-200/80 shadow-sm pointer-events-none">
@@ -670,7 +677,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
   const [measurements, setMeasurements] = useState([]); // Array of polylines
   const [currentMeasurement, setCurrentMeasurement] = useState([]); // Points of current measurement
   const [extractedFeatures, setExtractedFeatures] = useState([]); // Array of markers {id, lat, lng, type}
-  
+
   // New GIS Tool States
   const [polygonMeasurements, setPolygonMeasurements] = useState([]); // Array of { id, positions, area }
   const [currentPolygon, setCurrentPolygon] = useState([]);
@@ -719,7 +726,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
   const handlePolygonFinish = (latlng) => {
     if (currentPolygon.length >= 2) {
       const positions = [...currentPolygon, latlng];
-      
+
       // Calculate Area using Turf
       const coordinates = [...positions.map(p => [p.lng, p.lat]), [positions[0].lng, positions[0].lat]];
       const polygon = turf.polygon([coordinates]);
@@ -777,9 +784,9 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
 
 
   return (
-    <MapContainer 
-      center={[4.2105, 101.9758]} 
-      zoom={6} 
+    <MapContainer
+      center={[4.2105, 101.9758]}
+      zoom={6}
       style={{ height: '100%', width: '100%', background: '#f8fafc' }}
       zoomControl={false}
       preferCanvas={true}
@@ -787,7 +794,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
       <MapUpdater selectedPoint={selectedPoint} />
       <MapZoomHandler trigger={zoomToTrackTrigger} filteredPoints={filteredPoints} />
       <MapResizer resizeTrigger={resizeTrigger} />
-      
+
       {/* Active Tool Guidance Helper Banner */}
       {activeTool && !['download', 'clear'].includes(activeTool) && (
         <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-[3000] bg-white/95 backdrop-blur-md border border-gray-200/90 text-gray-800 text-xs px-4 py-2 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -805,7 +812,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
             {activeTool === 'buffer' && <><span className="text-blue-600 font-bold">⃝ Buffer Analysis:</span> Click on map to enter radius and generate buffer zone.</>}
             {activeTool === 'coordinate' && <><span className="text-blue-600 font-bold">🎯 Coords Converter:</span> Click on map to convert location to DD / DMS / UTM.</>}
           </span>
-          <button 
+          <button
             onClick={() => setActiveTool(null)}
             className="p-1 text-gray-400 hover:text-red-500 hover:bg-gray-100 rounded-lg transition-colors"
             title="Cancel Tool"
@@ -818,7 +825,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
       <MapFlyToListener />
       <BaseLayerRenderer activeBasemap={activeBasemap} />
       {!isEmbed && <MiniMap />}
-      {!isEmbed && <CoordinateDisplay />}
+      <CoordinateDisplay isEmbed={isEmbed} />
 
       {qgisWmsUrl && activeLayers && activeLayers.map((name) => (
         name !== 'panotrack' && (
@@ -833,7 +840,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
         )
       ))}
 
-      <PointsLayer 
+      <PointsLayer
         points={filteredPoints}
         activeLayers={activeLayers}
         filterColorByDate={filterColorByDate}
@@ -843,13 +850,13 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
       />
 
       {activeLayers && activeLayers.includes('panotrack') && selectedPoint && (
-        <SelectedMarker 
+        <SelectedMarker
           point={selectedPoint}
           viewState={viewState}
         />
       )}
 
-      <MapTools 
+      <MapTools
         activeTool={activeTool}
         onMeasureClick={handleMeasureClick}
         onExtractClick={handleExtractClick}
@@ -869,12 +876,12 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
           ))}
         </React.Fragment>
       ))}
-      
+
       {currentMeasurement.length > 0 && (
         <>
           <Polyline positions={currentMeasurement} color="#ef4444" dashArray="5, 10" weight={3} />
           {currentMeasurement.map((pos, j) => (
-             <CircleMarker key={j} center={pos} radius={4} color="#ef4444" fillColor="white" fillOpacity={1} weight={2} />
+            <CircleMarker key={j} center={pos} radius={4} color="#ef4444" fillColor="white" fillOpacity={1} weight={2} />
           ))}
         </>
       )}
@@ -882,22 +889,22 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
       {/* Polygon Measurements Rendering */}
       {polygonMeasurements.map((poly) => (
         <Polygon key={poly.id} positions={poly.positions} color="#3b82f6" fillOpacity={0.2} weight={2}>
-            <Popup>
-                <div className="text-sm">
-                    <strong>Area Measurement</strong><br/>
-                    {Math.round(poly.area).toLocaleString()} m²<br/>
-                    {(poly.area / 10000).toFixed(2)} hectares
-                </div>
-            </Popup>
+          <Popup>
+            <div className="text-sm">
+              <strong>Area Measurement</strong><br />
+              {Math.round(poly.area).toLocaleString()} m²<br />
+              {(poly.area / 10000).toFixed(2)} hectares
+            </div>
+          </Popup>
         </Polygon>
       ))}
 
       {currentPolygon.length > 0 && (
         <>
-            <Polyline positions={currentPolygon} color="#3b82f6" dashArray="5, 5" weight={2} />
-            {currentPolygon.map((pos, i) => (
-                <CircleMarker key={i} center={pos} radius={3} color="#3b82f6" fillColor="white" fillOpacity={1} />
-            ))}
+          <Polyline positions={currentPolygon} color="#3b82f6" dashArray="5, 5" weight={2} />
+          {currentPolygon.map((pos, i) => (
+            <CircleMarker key={i} center={pos} radius={3} color="#3b82f6" fillColor="white" fillOpacity={1} />
+          ))}
         </>
       )}
 
@@ -908,20 +915,20 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
 
       {/* Extracted Features */}
       {extractedFeatures.map((feat) => (
-        <Marker 
-          key={feat.id} 
+        <Marker
+          key={feat.id}
           position={[feat.lat, feat.lng]}
           icon={L.divIcon({
-             className: 'custom-div-icon',
-             html: `<div style="background-color: #f59e0b; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-             iconSize: [14, 14],
-             iconAnchor: [7, 7]
+            className: 'custom-div-icon',
+            html: `<div style="background-color: #f59e0b; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
           })}
         >
           <Popup>
             <div className="text-sm">
-              <strong>Extracted Feature</strong><br/>
-              ID: {feat.id}<br/>
+              <strong>Extracted Feature</strong><br />
+              ID: {feat.id}<br />
               Type: Point
             </div>
           </Popup>
@@ -930,7 +937,7 @@ const MapComponent = ({ isEmbed = false, points, filteredPoints, selectedPoint, 
 
       {/* Coordinate Popup */}
       {coordinateInfo && (
-          <CoordinatePopup latlng={coordinateInfo} onClose={() => setCoordinateInfo(null)} />
+        <CoordinatePopup latlng={coordinateInfo} onClose={() => setCoordinateInfo(null)} />
       )}
 
     </MapContainer>
