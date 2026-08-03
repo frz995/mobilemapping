@@ -62,8 +62,6 @@ const Layout = ({ isEmbed = false }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const viewerRef = useRef(null);
-
   // --- Filter State ---
   const [filterSubgrid, setFilterSubgrid] = useState('');
   const [filterDate, setFilterDate] = useState(''); // ISO Date string YYYY-MM-DD
@@ -74,6 +72,28 @@ const Layout = ({ isEmbed = false }) => {
   // --- Playback State ---
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1000); // ms per frame
+
+  // Initialize filterSubgrid from URL query parameter (e.g. ?subgrid=N94E70) AND listen for postMessage from parent Dashboard
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlSubgrid = params.get('subgrid');
+      if (urlSubgrid) {
+        setFilterSubgrid(urlSubgrid);
+      }
+    }
+
+    const handleMessage = (event) => {
+      if (event.data && (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID')) {
+        const sub = event.data.subgrid !== undefined ? event.data.subgrid : event.data.filter || '';
+        console.log('Layout received SUBGRID_FILTER message from parent:', sub);
+        setFilterSubgrid(sub || '');
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const handleZoomToTrack = React.useCallback(() => {
     setZoomToTrackTrigger(prev => prev + 1);
