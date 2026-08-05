@@ -1,128 +1,72 @@
-# 360 Web Mapping Application
+# 360° Mobile Mapping WebGIS
 
-A web-based 360° street view mapping application built with React, Vite, and Leaflet.
+A high-performance WebGIS platform designed as the primary visualization and asset digitization engine for the **TNB LV Network Mapping Project**. It provides immersive 360° street-view imagery synchronized with precise geospatial data layers.
 
-## Features
+## 🚀 Dashboard Integration
 
-- **Interactive Map**: View 360° panoramic locations on a map.
-- **360° Viewer**: Immersive panorama viewer using Pannellum.
-- **Attribute Table**: View and filter data in a tabular format.
-- **Measurement Tools**: Measure distances and areas.
-- **Cloud Storage Support**: Load panoramic images from cloud storage (AWS S3, Google Cloud, Azure).
+This WebGIS is a core component of the [TNB LV Network Mapping Processing Dashboard](https://360-mobile-mapping-processing-dashb.vercel.app/), where it is embedded via iframe to provide street-level inspection and spatial data extraction capabilities.
 
-## Configuration
+### Embedded Communication API (postMessage)
+The application supports bi-directional communication with the parent dashboard:
 
-### 1. Environment Variables
+| Event Type | Direction | Description |
+| :--- | :--- | :--- |
+| `SET_SUBGRID_FILTER` | **Dashboard → WebGIS** | Filters the map and viewer to specific grid IDs (e.g., `N94E70`). |
+| `MAP_COORDS` | **WebGIS → Dashboard** | Broadcasts real-time mouse cursor coordinates for cross-panel spatial tracking. |
+| `POINT_SELECTED` | **WebGIS → Dashboard** | *Planned:* Notifies the dashboard when a user selects a specific panoramic frame. |
 
-Create a `.env` file in the root directory (copy from `.env.example` if available).
+### 🛠️ Project Context Summary (Updated 2026-08-05)
 
+#### 1. Tech Stack & Core Libraries
+- **Frontend**: React 19, Vite 5, TailwindCSS.
+- **Map Engine**: **Leaflet 1.9** with `preferCanvas: true` for GPU-accelerated 60FPS rendering of 265+ points.
+- **360° Viewer**: Custom **Three.js** implementation with optimized 60FPS camera loop and throttled map-sync (32ms).
+- **Backend**: **Supabase** (PostGIS for panoramas, Storage for `MMS_PIC` bucket).
+- **Spatial Logic**: `@turf/turf` for adjacency, `proj4` for projections, `shpjs` for client-side parsing.
+
+#### 2. Key Features (Implemented & Working)
+- **High-Performance Markers**: 265 points rendered via Canvas with dynamic zoom-based scaling (smaller radius for clarity).
+- **60FPS Directional Cone**: Hardware-accelerated marker with CSS-interpolated rotation synced to 360° viewer yaw.
+- **Basemap Hub**: Dynamic switcher supporting 15+ layers (Google Satellite, Esri, Carto, OSM).
+- **Dashboard Integration**: `postMessage` API throttled to 20Hz (`MAP_COORDS`, `SET_SUBGRID_FILTER`).
+- **GIS Tools (Basic)**: Coordinate Display (Direct DOM updates), Nominatim Search, Auto-Fit Bounds.
+
+#### 3. Active State & Data Flow
+- **Central Hub**: `Layout.jsx` manages global state (`selectedPoint`, `filteredPoints`, `activeLayers`).
+- **Data Flow**: Supabase ➔ `Layout` (Memoized Filtering) ➔ `Map`/`Viewer`.
+- **Optimization**: Use of `React.memo` for markers and direct DOM manipulation for coordinate overlays to prevent React render lag.
+
+#### 4. Pending Tasks & Roadmap
+- **Next Feature**: Migrate GIS Tools (Measurement, Area, Buffer) from old logic to the optimized Leaflet/Canvas event system.
+- **Pending Bug**: Persistence of uploaded spatial layers (KML/GeoJSON) across subgrid filter changes.
+- **Integration**: Finalize `POINT_SELECTED` postMessage event to notify parent dashboard of specific frame inspection.
+
+### 4. Configuration
+
+#### Environment Variables (`.env`)
 ```env
-# Base URL for panoramic images
-# Option A: Cloud Storage / GitHub Pages (Predictable URLs)
-# VITE_IMAGE_BASE_URL=https://username.github.io/my-360-images/
-# VITE_IMAGE_BASE_URL=https://storage.googleapis.com/my-bucket/
+# Supabase Configuration
+VITE_SUPABASE_URL=your_project_url
+VITE_SUPABASE_ANON_KEY=your_anon_key
 
-# Option B: Random URLs (ImgBB, Google Drive) -> Leave EMPTY
-VITE_IMAGE_BASE_URL=
-
-# Metadata Source: CSV (default)
-VITE_METADATA_CSV_URL=/metadata.csv
-
-# Optional: GeoServer Configuration (for WFS layers)
-# VITE_GEOSERVER_URL=http://localhost:8080/geoserver/workspace
-# VITE_GEOSERVER_LAYER=workspace:layername
+# Image & Data Source
+VITE_IMAGE_BASE_URL=https://frz995.github.io/mobilemapping/
+VITE_QGIS_WMS_URL=https://your-qgis-server/wms
 ```
 
-### 2. Data Structure (CSV)
+#### Directory Structure
+- `public/MMS_PIC/`: Source panoramic images.
+- `public/tiles/`: Tiled panorama configurations and image fragments.
+- `src/hooks/`: Specialized hooks for Supabase, CSV, WFS, and 360° measurements.
+- `scripts/`: Data engineering tools for tiling and DB synchronization.
 
-Your `metadata.csv` should have the following columns:
+### 5. Deployment
+The app is optimized for **GitHub Pages** deployment under the `/mobilemapping/` path.
+- **Build**: `npm run build`
+- **Deploy**: `npm run deploy` (uses `gh-pages`)
 
-| Column | Description |
-|---|---|
-| `id` | Unique identifier for the point |
-| `lat` | Latitude (decimal degrees) |
-| `lon` | Longitude (decimal degrees) |
-| `filename` | Name of the image file (e.g., `pano_001.jpg`) |
-| `bearing` | Heading of the image (0-360) |
-| `date` | Capture date (YYYY-MM-DD) |
-
-**Note on Image Loading:**
-- **Option A (Predictable URLs):** Set `VITE_IMAGE_BASE_URL`. The app loads `${VITE_IMAGE_BASE_URL}/${filename}`.
-- **Option B (Direct/Random URLs):** Leave `VITE_IMAGE_BASE_URL` empty. Add an `image_url` column to your CSV with the full link.
-
-### 3. Free Cloud Storage Options (For Option A)
-
-If you need free hosting that supports predictable URLs (Base URL + Filename) and CORS:
-
-#### **1. GitHub Pages (Recommended for < 1GB)**
-Completely free and easiest to set up.
-1. Create a new public repository on GitHub (e.g., `my-360-images`).
-2. Upload your images to the root or a folder.
-3. Go to **Settings > Pages** and enable GitHub Pages from the `main` branch.
-4. Your Base URL will be: `https://<username>.github.io/<repo-name>/`
-5. **CORS is enabled by default**, so it works perfectly.
-
-#### **2. Supabase Storage (Free Tier)**
-Provides 1GB of storage with an easy dashboard.
-1. Create a "Public" bucket named `panoramas`.
-2. Upload images.
-3. Your Base URL will be: `https://<project-ref>.supabase.co/storage/v1/object/public/panoramas/`
-4. **CORS:** Go to Bucket Settings and add your app's URL (or `*`) to CORS Origins.
-
-#### **3. Firebase Storage (Google Cloud)**
-Generous free tier (5GB). Requires slightly more setup for "predictable" URLs.
-1. Create a Firebase project and enable Storage.
-2. Change Rules to allow read access: `allow read: if true;`
-3. Upload images.
-4. **Important:** By default, Firebase uses "token" URLs. To use predictable paths, you must access them via the Google Cloud Storage XML API format:
-   `https://storage.googleapis.com/<project-id>.appspot.com/`
-5. You must configure CORS using `gsutil` or the Google Cloud Console.
-
-### 4. Cloud Storage CORS Configuration
-
-If using AWS S3, Azure, or GCS, you **must enable CORS** to allow the application to load images.
-
-**AWS S3 CORS Configuration:**
-```json
-[
-    {
-        "AllowedHeaders": ["*"],
-        "AllowedMethods": ["GET", "HEAD"],
-        "AllowedOrigins": ["*"],
-        "ExposeHeaders": []
-    }
-]
-```
-
-## Deployment
-
-### Deploying to GitHub Pages
-
-1.  **Initialize Git** (if not already done):
-    ```bash
-    git init
-    git add .
-    git commit -m "Initial commit"
-    ```
-
-2.  **Create a Repository on GitHub** and link it:
-    ```bash
-    git remote add origin https://github.com/<YOUR_USERNAME>/<YOUR_REPO_NAME>.git
-    git push -u origin main
-    ```
-
-3.  **Deploy the App**:
-    This project includes the `gh-pages` package for easy deployment.
-    ```bash
-    npm run deploy
-    ```
-    This command will build the project and push the `dist` folder to a `gh-pages` branch.
-
-4.  **Configure GitHub Pages**:
-    - Go to your repository **Settings > Pages**.
-    - Ensure the source is set to `gh-pages` branch.
-    - Your site will be live at: `https://<YOUR_USERNAME>.github.io/<YOUR_REPO_NAME>/`
-
-5.  **Update Configuration**:
-    - Update `homepage` in `package.json` to your actual GitHub Pages URL.
-    - If you are hosting images in the same repo (Option A), update `VITE_IMAGE_BASE_URL` in `.env` to match your Pages URL.
+### 6. Current WIP & Dashboard Integration Roadmap
+- **WIP**: Refinement of the "filtered subgrid" marker animation (Sonar Pulse) in `Map.jsx` to align with processing dashboard UI styling.
+- **Next Feature**: Cross-dashboard persistent layer registry for uploaded spatial files, syncing layer state between the embedded WebGIS and main processing dashboard.
+- **Integration**: Enhanced `postMessage` communication to pass selected subgrid filters, active layer lists, and measurement data from the WebGIS to the parent processing dashboard.
+- **Optimization**: Runtime correction for absolute asset paths in static JSON configs to ensure seamless compatibility across local development, staging, and production dashboard environments.

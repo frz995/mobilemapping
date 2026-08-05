@@ -21,6 +21,7 @@
     "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.575.0",
+    "maplibre-gl": "^6.1.0",
     "pannellum": "^2.5.7",
     "papaparse": "^5.5.3",
     "proj4": "^2.20.2",

@@ -39,14 +39,24 @@ export function useSupabasePoints() {
                 } else {
                     const formattedPoints = data.map(item => {
                         const rawSubgrid = item.subgrid || extractSubgrid(item.filename || item.image_url || item.description);
+                        
+                        // Construct public URL if image_url is just a path/filename
+                        let imageUrl = item.image_url || item.filename || '';
+                        if (imageUrl && !imageUrl.startsWith('http')) {
+                            // Strip any existing MMS_PIC/ prefix to avoid double-pathing in getPublicUrl
+                            const cleanPath = imageUrl.replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');
+                            const { data: { publicUrl } } = supabase.storage
+                                .from('MMS_PIC')
+                                .getPublicUrl(cleanPath);
+                            imageUrl = publicUrl;
+                        }
+
                         return {
                             ...item,
                             subgrid: (rawSubgrid || 'UNKNOWN').toUpperCase(),
                             lon: item.longitude ?? item.lon,
                             lat: item.latitude ?? item.lat,
-                            image_url: item.image_url?.startsWith('http')
-                                ? item.image_url
-                                : `${import.meta.env.VITE_IMAGE_BASE_URL || ''}${item.image_url || item.filename}`
+                            image_url: imageUrl
                         };
                     });
                     setPoints(formattedPoints);

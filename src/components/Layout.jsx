@@ -54,6 +54,8 @@ const Layout = ({ isEmbed = false }) => {
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 
+  const viewerRef = useRef(null);
+
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -114,9 +116,12 @@ const Layout = ({ isEmbed = false }) => {
 
   // --- Filter Logic (Lifted from Map.jsx) ---
   const filteredPoints = useMemo(() => {
-    if (!points) return [];
+    if (!points || points.length === 0) {
+      console.log('Layout: points array is empty or null');
+      return [];
+    }
 
-    return points.filter(point => {
+    const result = points.filter(point => {
       // 1. Subgrid Filter
       if (filterSubgrid && filterSubgrid.trim() !== '') {
         const searchTerms = filterSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(s => s);
@@ -146,6 +151,9 @@ const Layout = ({ isEmbed = false }) => {
 
       return true;
     });
+
+    console.log(`Layout: Filtered points count: ${result.length}/${points.length} (Filter: "${filterSubgrid}")`);
+    return result;
   }, [points, filterSubgrid, filterDate, filterDateStrict]);
 
   // --- Auto-Play Logic ---
@@ -405,6 +413,7 @@ const Layout = ({ isEmbed = false }) => {
               const fallbackFile = config.multiRes.fallbackPath.replace('%s', 'f');
               const fallbackUrl = `${basePath}${fallbackFile}`;
               const img = new Image();
+              img.crossOrigin = 'anonymous';
               img.src = fallbackUrl;
             }
           })
@@ -422,6 +431,7 @@ const Layout = ({ isEmbed = false }) => {
           }
         }
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         img.src = url;
       }
     });

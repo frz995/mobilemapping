@@ -295,3 +295,70 @@ canvas, video, img {
 .transition-all { transition-property: all !important; }
 .transition-colors { transition-property: color, background-color, border-color !important; }
 
+/* ============================================================
+   PANOTRACK MARKER ANIMATIONS (Sonar/Radar Pulse)
+   ============================================================ */
+
+/* Hardware Acceleration for 60FPS Map */
+.leaflet-container {
+  will-change: transform;
+}
+
+.leaflet-zoom-animated {
+  will-change: transform;
+}
+
+.panotrack-sonar-container, 
+.cone-rotator-wrapper,
+.panotrack-point {
+  will-change: transform;
+  backface-visibility: hidden;
+  transition: transform 0.1s cubic-bezier(0.2, 0, 0.4, 1);
+}
+
+@keyframes sonarPulse {
+  0% { transform: scale(0.5) translateZ(0); opacity: 0.95; }
+  70%, 100% { transform: scale(2.0) translateZ(0); opacity: 0; }
+}
+
+@keyframes coreGlow {
+  0%, 100% { 
+    transform: scale(1) translateZ(0); 
+    box-shadow: 0 0 12px #00f2ff, 0 0 24px rgba(0, 242, 255, 0.7); 
+  }
+  50% { 
+    transform: scale(1.15) translateZ(0); 
+    box-shadow: 0 0 18px #00f2ff, 0 0 32px rgba(0, 242, 255, 0.95); 
+  }
+}
+
+.panotrack-sonar-container {
+  position: relative; 
+  width: 44px; 
+  height: 44px; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  pointer-events: none;
+}
+
+.panotrack-sonar-ring {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 242, 255, 0.35) 0%, rgba(2, 132, 199, 0.1) 70%, transparent 100%);
+  border: 1.5px solid rgba(0, 242, 255, 0.85);
+  animation: sonarPulse 2.0s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.panotrack-sonar-core {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: #00f2ff;
+  border: 2.5px solid #ffffff;
+  animation: coreGlow 2.0s ease-in-out infinite;
+}
+

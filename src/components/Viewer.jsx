@@ -136,8 +136,13 @@ const Viewer = forwardRef(({
   const [p2Point, setP2Point] = useState(null);
   const [distanceResult, setDistanceResult] = useState(null);
 
-  // Screen Projection Tick State
-  const [, setRenderTick] = useState(0);
+  // Projected Screen Refs (Direct DOM Updates)
+  const vMidLabelRef = useRef(null);
+  const inspectorLabelRef = useRef(null);
+  const polyCenterLabelRef = useRef(null);
+
+  // Screen Projection Tick State - REMOVED for performance
+  // const [, setRenderTick] = useState(0);
 
   // Callback Refs
   const onViewChangeRef = useRef(onViewChange);
@@ -245,7 +250,7 @@ const Viewer = forwardRef(({
   }, []);
 
   // Update Three.js Camera Orientation Deterministically (YXZ Order)
-  const applyCameraMatrix = useCallback(() => {
+  const applyCameraMatrix = useCallback((shouldNotify = true) => {
     if (!cameraRef.current) return;
     const angles = cameraAngleRef.current;
 
@@ -259,7 +264,7 @@ const Viewer = forwardRef(({
     cameraRef.current.fov = angles.fov;
     cameraRef.current.updateProjectionMatrix();
 
-    if (onViewChangeRef.current) {
+    if (shouldNotify && onViewChangeRef.current) {
       onViewChangeRef.current({ yaw: angles.yaw, pitch: angles.pitch, hfov: angles.fov });
     }
   }, [extrinsics]);
@@ -456,10 +461,12 @@ const Viewer = forwardRef(({
     measure3DGroupRef.current = measureGroup;
 
     // 4. Smooth 60 FPS Damping Loop
+    let lastNotifyTime = 0;
     const animate = () => {
       animFrameIdRef.current = requestAnimationFrame(animate);
 
       const angles = cameraAngleRef.current;
+      const now = performance.now();
 
       const dampingFactor = 0.18;
       const yawDiff = getAngleDiff(angles.targetYaw, angles.yaw);
@@ -471,8 +478,45 @@ const Viewer = forwardRef(({
       angles.targetFov = Math.max(30, Math.min(110, angles.targetFov));
       angles.fov += (angles.targetFov - angles.fov) * dampingFactor;
 
-      applyCameraMatrix();
-      setRenderTick(t => (t + 1) % 1000);
+      // Notify parent more frequently for smooth map cone (32ms = ~30fps)
+      const shouldNotify = now - lastNotifyTime > 32;
+      if (shouldNotify) lastNotifyTime = now;
+      
+      applyCameraMatrix(shouldNotify);
+      
+      // Update projected labels directly in the loop to avoid React re-renders
+      if (vMidLabelRef.current && verticalHeightResult?.midPoint3D) {
+        const screenPos = projectToScreen(verticalHeightResult.midPoint3D);
+        if (screenPos) {
+          vMidLabelRef.current.style.display = 'block';
+          vMidLabelRef.current.style.left = `${screenPos.x}px`;
+          vMidLabelRef.current.style.top = `${screenPos.y}px`;
+        } else {
+          vMidLabelRef.current.style.display = 'none';
+        }
+      }
+
+      if (inspectorLabelRef.current && inspectorData?.worldPoint) {
+        const screenPos = projectToScreen(inspectorData.worldPoint);
+        if (screenPos) {
+          inspectorLabelRef.current.style.display = 'flex';
+          inspectorLabelRef.current.style.left = `${screenPos.x}px`;
+          inspectorLabelRef.current.style.top = `${screenPos.y}px`;
+        } else {
+          inspectorLabelRef.current.style.display = 'none';
+        }
+      }
+
+      if (polyCenterLabelRef.current && polygonResult?.center3D) {
+        const screenPos = projectToScreen(polygonResult.center3D);
+        if (screenPos) {
+          polyCenterLabelRef.current.style.display = 'block';
+          polyCenterLabelRef.current.style.left = `${screenPos.x}px`;
+          polyCenterLabelRef.current.style.top = `${screenPos.y}px`;
+        } else {
+          polyCenterLabelRef.current.style.display = 'none';
+        }
+      }
 
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
@@ -769,19 +813,6 @@ const Viewer = forwardRef(({
     setAssetNotes('');
   };
 
-  // Projected Screen Coordinates for Direct Value Labels
-  const vMidScreen = useMemo(() => {
-    return verticalHeightResult?.midPoint3D ? projectToScreen(verticalHeightResult.midPoint3D) : null;
-  }, [projectToScreen, verticalHeightResult]);
-
-  const inspectorScreen = useMemo(() => {
-    return inspectorData?.worldPoint ? projectToScreen(inspectorData.worldPoint) : null;
-  }, [projectToScreen, inspectorData]);
-
-  const polyCenterScreen = useMemo(() => {
-    return polygonResult?.center3D ? projectToScreen(polygonResult.center3D) : null;
-  }, [projectToScreen, polygonResult]);
-
   return (
     <div className="w-full h-full relative group bg-black overflow-hidden select-none">
       {/* Three.js WebGL Container */}
@@ -804,10 +835,10 @@ const Viewer = forwardRef(({
       />
 
       {/* 1. Direct Vertical Height Midpoint Value Label (e.g. 9.99m) */}
-      {verticalHeightResult && vMidScreen && (
+      {verticalHeightResult && (
         <div
+          ref={vMidLabelRef}
           className="absolute z-30 pointer-events-none transform -translate-x-1/2 -translate-y-1/2"
-          style={{ left: `${vMidScreen.x}px`, top: `${vMidScreen.y}px` }}
         >
           <span
             className="text-white text-xs font-bold font-mono tracking-tight"
@@ -819,10 +850,10 @@ const Viewer = forwardRef(({
       )}
 
       {/* 2. Direct Coordinate Inspector Cursor Box & Single-Line Text (39.199942, 21.409290, -2.350) */}
-      {activeTool === 'coord-inspector' && inspectorData && inspectorScreen && (
+      {activeTool === 'coord-inspector' && inspectorData && (
         <div
+          ref={inspectorLabelRef}
           className="absolute z-30 pointer-events-none transform -translate-x-1/2 -translate-y-1/2 flex items-center gap-1"
-          style={{ left: `${inspectorScreen.x}px`, top: `${inspectorScreen.y}px` }}
         >
           {/* Small White Square Target Box Cursor */}
           <div className="w-3 h-3 bg-transparent border-2 border-white shadow-sm shrink-0" />
@@ -836,10 +867,10 @@ const Viewer = forwardRef(({
       )}
 
       {/* 3. Direct Polygon Center Total Overall Area Value Label (e.g. 13.22m² or 123.45m²) Floating at Center of Drawn Area */}
-      {polygonResult && polyCenterScreen && (
+      {polygonResult && (
         <div
+          ref={polyCenterLabelRef}
           className="absolute z-30 pointer-events-none transform -translate-x-1/2 -translate-y-1/2"
-          style={{ left: `${polyCenterScreen.x}px`, top: `${polyCenterScreen.y}px` }}
         >
           <span
             className="text-white text-xs font-bold font-mono tracking-tight"

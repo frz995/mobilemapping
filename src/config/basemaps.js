@@ -6,6 +6,20 @@ export const BASEMAPS = [
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     preview: 'https://a.basemaps.cartocdn.com/light_all/12/3205/2012.png'
   },
+  {
+    id: 'bright',
+    name: 'MapLibre Bright (OpenFreeMap)',
+    url: 'https://tiles.openfreemap.org/styles/bright',
+    attribution: '&copy; OpenStreetMap contributors',
+    preview: 'https://tiles.openfreemap.org/styles/bright/preview.png'
+  },
+  {
+    id: 'liberty',
+    name: 'MapLibre Liberty (OpenFreeMap)',
+    url: 'https://tiles.openfreemap.org/styles/liberty',
+    attribution: '&copy; OpenStreetMap contributors',
+    preview: 'https://tiles.openfreemap.org/styles/liberty/preview.png'
+  },
   { 
     id: 'osm', 
     name: 'OpenStreetMap Standard', 
