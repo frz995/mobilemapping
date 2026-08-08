@@ -86,10 +86,31 @@ const Layout = ({ isEmbed = false }) => {
     }
 
     const handleMessage = (event) => {
-      if (event.data && (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID')) {
+      if (!event.data) return;
+
+      if (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID') {
         const sub = event.data.subgrid !== undefined ? event.data.subgrid : event.data.filter || '';
         console.log('Layout received SUBGRID_FILTER message from parent:', sub);
         setFilterSubgrid(sub || '');
+      } else if (event.data.type === 'CAMERA_ROTATED') {
+        setViewState(prev => ({
+          ...prev,
+          yaw: typeof event.data.yaw === 'number' ? event.data.yaw : prev.yaw,
+          pitch: typeof event.data.pitch === 'number' ? event.data.pitch : prev.pitch
+        }));
+      } else if (event.data.type === 'MAP_POINT_SELECTED') {
+        const pt = event.data.point || event.data.payload || event.data;
+        if (pt) {
+          setSelectedPoint(prev => ({
+            ...prev,
+            ...pt,
+            lat: typeof pt.lat === 'number' ? pt.lat : (parseFloat(pt.lat) || (prev ? prev.lat : 2.54866)),
+            lon: typeof pt.lon === 'number' ? pt.lon : (typeof pt.lng === 'number' ? pt.lng : (parseFloat(pt.lon || pt.lng) || (prev ? prev.lon : 102.815835)))
+          }));
+          if (typeof pt.bearing === 'number') {
+            setViewState(prev => ({ ...prev, yaw: pt.bearing }));
+          }
+        }
       }
     };
 
@@ -115,16 +136,17 @@ const Layout = ({ isEmbed = false }) => {
   }, [pointsError]);
 
   // --- Filter Logic (Lifted from Map.jsx) ---
+  // Filter points based on active subgrid or date range
   const filteredPoints = useMemo(() => {
-    if (!points || points.length === 0) {
-      console.log('Layout: points array is empty or null');
-      return [];
-    }
+    if (!points || points.length === 0) return [];
+
+    // Subgrid filter is strictly controlled by processing control admin/sidebar UI (filterSubgrid)
+    const activeSubgrid = filterSubgrid || '';
 
     const result = points.filter(point => {
-      // 1. Subgrid Filter
-      if (filterSubgrid && filterSubgrid.trim() !== '') {
-        const searchTerms = filterSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(s => s);
+      // 1. Subgrid Filter (from Admin / Sidebar Filter UI)
+      if (activeSubgrid && activeSubgrid.trim() !== '') {
+        const searchTerms = activeSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(s => s);
         const pointSubgrid = (
           point.subgrid ||
           (point.filename ? point.filename.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
@@ -152,64 +174,9 @@ const Layout = ({ isEmbed = false }) => {
       return true;
     });
 
-    console.log(`Layout: Filtered points count: ${result.length}/${points.length} (Filter: "${filterSubgrid}")`);
+    console.log(`Layout: Filtered points count: ${result.length}/${points.length} (Active Subgrid: "${activeSubgrid}")`);
     return result;
   }, [points, filterSubgrid, filterDate, filterDateStrict]);
-
-  // --- Auto-Play Logic ---
-  useEffect(() => {
-    let intervalId;
-    if (isPlaying && filteredPoints.length > 0) {
-      intervalId = setInterval(() => {
-        setSelectedPoint(prev => {
-          if (!prev) return filteredPoints[0];
-          const currentIndex = filteredPoints.findIndex(p => p.id === prev.id);
-          if (currentIndex === -1 || currentIndex === filteredPoints.length - 1) {
-            // Stop at end or if not found
-            setIsPlaying(false);
-            return prev;
-          }
-          const nextPoint = filteredPoints[currentIndex + 1];
-          // Update view state for new point
-          setViewState(v => ({ ...v, yaw: nextPoint.bearing }));
-          return nextPoint;
-        });
-      }, playbackSpeed);
-    }
-    return () => clearInterval(intervalId);
-  }, [isPlaying, filteredPoints, playbackSpeed]);
-
-  const handleNextFrame = React.useCallback(() => {
-    if (filteredPoints.length === 0) return;
-    if (!selectedPoint) {
-      const firstPoint = filteredPoints[0];
-      setSelectedPoint(firstPoint);
-      setViewState(v => ({ ...v, yaw: firstPoint.bearing }));
-      return;
-    }
-    const currentIndex = filteredPoints.findIndex(p => p.id === selectedPoint.id);
-    if (currentIndex < filteredPoints.length - 1) {
-      const nextPoint = filteredPoints[currentIndex + 1];
-      setSelectedPoint(nextPoint);
-      setViewState(v => ({ ...v, yaw: nextPoint.bearing }));
-    }
-  }, [selectedPoint, filteredPoints]);
-
-  const handlePrevFrame = React.useCallback(() => {
-    if (filteredPoints.length === 0) return;
-    if (!selectedPoint) {
-      const firstPoint = filteredPoints[0];
-      setSelectedPoint(firstPoint);
-      setViewState(v => ({ ...v, yaw: firstPoint.bearing }));
-      return;
-    }
-    const currentIndex = filteredPoints.findIndex(p => p.id === selectedPoint.id);
-    if (currentIndex > 0) {
-      const prevPoint = filteredPoints[currentIndex - 1];
-      setSelectedPoint(prevPoint);
-      setViewState(v => ({ ...v, yaw: prevPoint.bearing }));
-    }
-  }, [selectedPoint, filteredPoints]);
 
   const handleSnapshot = React.useCallback(async () => {
     if (!viewerRef.current || !selectedPoint) return;
@@ -338,10 +305,65 @@ const Layout = ({ isEmbed = false }) => {
   }, [selectedPoint, filteredPoints]);
 
   const handlePointSelect = React.useCallback((point) => {
-    setSelectedPoint(point);
-    setViewState(prev => ({ ...prev, yaw: point.bearing }));
+    if (!point) return;
+    const fn = (point.filename || '').replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');
+    const resolvedUrl = (point.image_url && typeof point.image_url === 'string' && point.image_url.trim().length > 0)
+      ? (point.image_url.startsWith('http') || point.image_url.startsWith('/') ? point.image_url : `/MMS_PIC/${point.image_url.replace(/^\/+/, '').replace(/^MMS_PIC\//i, '')}`)
+      : (fn ? `/MMS_PIC/${fn}` : '');
+
+    const selectedPt = {
+      ...point,
+      image_url: resolvedUrl,
+      subgrid: point.subgrid || 'KL_Drive_04',
+      lat: parseFloat(point.lat ?? point.latitude ?? 2.54866),
+      lng: parseFloat(point.lon ?? point.longitude ?? point.lng ?? 102.815835)
+    };
+
+    setSelectedPoint(selectedPt);
+    setViewState(prev => ({ ...prev, yaw: point?.bearing || point?.heading || 0 }));
     trackPointVisit(point?.subgrid);
+
+    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'MAP_POINT_SELECTED',
+        point: selectedPt
+      }, '*');
+    }
   }, [trackPointVisit]);
+
+  // Calculate clean frame index relative to active dataset (unfiltered unless sidebar filter is selected)
+  const currentFrameIndex = React.useMemo(() => {
+    if (!selectedPoint || !filteredPoints || filteredPoints.length === 0) return 0;
+    const idx = filteredPoints.findIndex(p =>
+      (p.id !== undefined && p.id === selectedPoint.id) ||
+      (p.filename && selectedPoint.filename && p.filename === selectedPoint.filename) ||
+      (p.image_url && selectedPoint.image_url && p.image_url === selectedPoint.image_url)
+    );
+    return idx >= 0 ? idx : 0;
+  }, [selectedPoint, filteredPoints]);
+
+  const handlePrevFrame = React.useCallback(() => {
+    if (currentFrameIndex > 0 && filteredPoints[currentFrameIndex - 1]) {
+      handlePointSelect(filteredPoints[currentFrameIndex - 1]);
+    }
+  }, [currentFrameIndex, filteredPoints, handlePointSelect]);
+
+  const handleNextFrame = React.useCallback(() => {
+    if (currentFrameIndex < filteredPoints.length - 1 && filteredPoints[currentFrameIndex + 1]) {
+      handlePointSelect(filteredPoints[currentFrameIndex + 1]);
+    }
+  }, [currentFrameIndex, filteredPoints, handlePointSelect]);
+
+  // --- Auto-Play Logic ---
+  useEffect(() => {
+    let intervalId;
+    if (isPlaying && filteredPoints.length > 0) {
+      intervalId = setInterval(() => {
+        handleNextFrame();
+      }, playbackSpeed);
+    }
+    return () => clearInterval(intervalId);
+  }, [isPlaying, filteredPoints, playbackSpeed, handleNextFrame]);
 
   const handleViewChange = React.useCallback((newView) => {
     setViewState((prev) => ({ ...prev, ...newView }));
@@ -350,9 +372,11 @@ const Layout = ({ isEmbed = false }) => {
   // Stable callback for map point selection — also counts as a map click
   const handleMapPointSelect = React.useCallback((point) => {
     handlePointSelect(point);
-    setIsViewerOpen(true);
+    if (!isEmbed) {
+      setIsViewerOpen(true);
+    }
     trackMapClick();
-  }, [handlePointSelect, trackMapClick]);
+  }, [handlePointSelect, isEmbed, trackMapClick]);
 
   // Navigate via hotspot arrow — counts as nav step
   const handleNavigate = React.useCallback((point) => {
@@ -391,16 +415,13 @@ const Layout = ({ isEmbed = false }) => {
 
   // Preload next/prev images and tile configs for smoother Street View style jumps
   useEffect(() => {
-    if (!selectedPoint || !filteredPoints.length) return;
-
-    const currentIndex = filteredPoints.indexOf(selectedPoint);
-    if (currentIndex === -1) return;
+    if (!selectedPoint || !filteredPoints.length || currentFrameIndex === -1) return;
 
     const pointsToPreload = [];
     // Preload next 2 points and previous 1 point
-    if (currentIndex + 1 < filteredPoints.length) pointsToPreload.push(filteredPoints[currentIndex + 1]);
-    if (currentIndex + 2 < filteredPoints.length) pointsToPreload.push(filteredPoints[currentIndex + 2]);
-    if (currentIndex - 1 >= 0) pointsToPreload.push(filteredPoints[currentIndex - 1]);
+    if (currentFrameIndex + 1 < filteredPoints.length) pointsToPreload.push(filteredPoints[currentFrameIndex + 1]);
+    if (currentFrameIndex + 2 < filteredPoints.length) pointsToPreload.push(filteredPoints[currentFrameIndex + 2]);
+    if (currentFrameIndex - 1 >= 0) pointsToPreload.push(filteredPoints[currentFrameIndex - 1]);
 
     pointsToPreload.forEach(point => {
       // 1. Preload config JSON if tile configUrl is present
@@ -597,7 +618,7 @@ const Layout = ({ isEmbed = false }) => {
               <button
                 onClick={handlePrevFrame}
                 className="p-1.5 sm:p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-lg sm:rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group shrink-0"
-                disabled={selectedPoint && filteredPoints.indexOf(selectedPoint) <= 0}
+                disabled={currentFrameIndex <= 0}
                 title="Previous Frame"
               >
                 <SkipBack className="w-4 h-4 sm:w-5 sm:h-5 group-hover:-translate-x-0.5 transition-transform" />
@@ -623,7 +644,7 @@ const Layout = ({ isEmbed = false }) => {
               <button
                 onClick={handleNextFrame}
                 className="p-1.5 sm:p-2.5 hover:bg-gray-100 text-gray-700 hover:text-blue-600 rounded-lg sm:rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed group shrink-0"
-                disabled={selectedPoint && filteredPoints.indexOf(selectedPoint) >= filteredPoints.length - 1}
+                disabled={currentFrameIndex >= filteredPoints.length - 1}
                 title="Next Frame"
               >
                 <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-0.5 transition-transform" />
@@ -634,7 +655,7 @@ const Layout = ({ isEmbed = false }) => {
               <div className="flex flex-col items-center px-1 sm:px-2 min-w-[45px] sm:min-w-[60px] shrink-0">
                 <span className="text-[8px] sm:text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Frame</span>
                 <div className="text-xs sm:text-sm font-bold text-gray-700 font-mono leading-none">
-                  {selectedPoint ? filteredPoints.indexOf(selectedPoint) + 1 : 0}<span className="text-gray-300 font-normal mx-0.5 sm:mx-1">/</span>{filteredPoints.length}
+                  {currentFrameIndex + 1}<span className="text-gray-300 font-normal mx-0.5 sm:mx-1">/</span>{filteredPoints.length}
                 </div>
               </div>
 

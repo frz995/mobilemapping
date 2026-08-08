@@ -94,13 +94,15 @@ const CoordinatePopupContent = ({ latlng, onClose }) => {
 };
 
 // --- Map Logic Controller ---
-const MapController = ({ 
-  filteredPoints, 
-  selectedPoint, 
-  activeBasemap, 
-  activeTool, 
-  setActiveTool, 
+const MapController = ({
+  filteredPoints,
+  selectedPoint,
+  activeBasemap,
+  activeTool,
+  setActiveTool,
   zoomToTrackTrigger,
+  resizeTrigger,
+  isViewerOpen,
   viewState,
   isEmbed,
   setMapInstance,
@@ -108,49 +110,83 @@ const MapController = ({
 }) => {
   const map = useMap();
 
+  // Auto-invalidate map size on container resize, splitter drag, or viewer toggle
+  useEffect(() => {
+    if (!map) return;
+
+    map.invalidateSize();
+    const t1 = setTimeout(() => map.invalidateSize(), 100);
+    const t2 = setTimeout(() => map.invalidateSize(), 300);
+
+    const container = map.getContainer();
+    if (!container) return () => { clearTimeout(t1); clearTimeout(t2); };
+
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [map, resizeTrigger, isViewerOpen]);
+
   useEffect(() => {
     if (map) {
       setMapInstance(map);
       window.MAP = map; // For debugging
-      
+
       const onZoom = () => setCurrentZoom(map.getZoom());
       map.on('zoomend', onZoom);
       return () => map.off('zoomend', onZoom);
     }
   }, [map, setMapInstance, setCurrentZoom]);
 
-  // Auto-fit Bounds
+  // Auto-fit Bounds (only when NO selectedPoint is present)
   useEffect(() => {
-    if (filteredPoints.length > 0) {
+    if (!selectedPoint && filteredPoints.length > 0) {
       const latlngs = filteredPoints
         .map(p => {
-          const ln = parseFloat(p.lon ?? p.longitude);
+          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng);
           const lt = parseFloat(p.lat ?? p.latitude);
           return isNaN(ln) || isNaN(lt) ? null : [lt, ln];
         })
         .filter(Boolean);
-      
+
       if (latlngs.length > 0) {
         const bounds = L.latLngBounds(latlngs);
         map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
       }
     }
-  }, [filteredPoints, map]);
+  }, [filteredPoints, selectedPoint, map]);
 
-  // Fly to track
+  // Fly to selected point track at max zoom level (level 19)
   useEffect(() => {
-    if (selectedPoint && zoomToTrackTrigger) {
+    if (selectedPoint) {
       const lat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude);
-      const lon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude);
+      const lon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng);
       if (!isNaN(lat) && !isNaN(lon)) {
-        map.flyTo([lat, lon], 18, { animate: true, duration: 1 });
+        map.flyTo([lat, lon], 19, { animate: true, duration: 0.8 });
       }
     }
-  }, [zoomToTrackTrigger, selectedPoint, map]);
+  }, [selectedPoint, zoomToTrackTrigger, map]);
+
+  // Listen for map-fly-to events from search
+  useEffect(() => {
+    const handleFlyTo = (e) => {
+      if (map && e.detail && typeof e.detail.lat === 'number' && typeof e.detail.lon === 'number') {
+        map.flyTo([e.detail.lat, e.detail.lon], 16);
+      }
+    };
+    window.addEventListener('map-fly-to', handleFlyTo);
+    return () => window.removeEventListener('map-fly-to', handleFlyTo);
+  }, [map]);
 
   // Throttled postMessage for Dashboard
   const lastPostTimeRef = useRef(0);
-  
+
   useMapEvents({
     mousemove: (e) => {
       const now = performance.now();
@@ -158,7 +194,8 @@ const MapController = ({
         window.parent.postMessage({
           type: 'MAP_COORDS',
           lat: e.latlng.lat,
-          lon: e.latlng.lng
+          lon: e.latlng.lng,
+          lng: e.latlng.lng
         }, '*');
         lastPostTimeRef.current = now;
       }
@@ -210,7 +247,7 @@ const PointMarker = React.memo(({ point, radius, weight, color, onClick }) => {
 // --- Sonar Marker Component for 60FPS Rotation ---
 const SonarMarker = ({ position, yaw }) => {
   const markerRef = useRef(null);
-  
+
   // Use a stable icon - we'll rotate the internal element via CSS
   const sonarIcon = useMemo(() => L.divIcon({
     className: 'custom-sonar-icon',
@@ -255,23 +292,23 @@ const SonarMarker = ({ position, yaw }) => {
   );
 };
 
-const MapComponent = ({ 
-  isEmbed = false, 
-  points = [], 
-  filteredPoints = [], 
-  selectedPoint, 
-  onPointSelect, 
-  viewState, 
-  qgisWmsUrl, 
-  activeLayers = [], 
-  activeBasemap, 
-  activeTool, 
-  setActiveTool, 
-  filterSubgrid, 
-  filterDate, 
-  filterColorByDate, 
-  zoomToTrackTrigger, 
-  resizeTrigger, 
+const MapComponent = ({
+  isEmbed = false,
+  points = [],
+  filteredPoints = [],
+  selectedPoint,
+  onPointSelect,
+  viewState,
+  qgisWmsUrl,
+  activeLayers = ['panotrack'],
+  activeBasemap,
+  activeTool,
+  setActiveTool,
+  filterSubgrid,
+  filterDate,
+  filterColorByDate,
+  zoomToTrackTrigger,
+  resizeTrigger,
   isViewerOpen,
   isDrawingExportBBox,
   onBoundaryDrawn
@@ -311,9 +348,9 @@ const MapComponent = ({
 
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
-      <MapContainer 
-        center={INITIAL_CENTER} 
-        zoom={INITIAL_ZOOM} 
+      <MapContainer
+        center={INITIAL_CENTER}
+        zoom={INITIAL_ZOOM}
         className="h-full w-full"
         zoomControl={false}
         preferCanvas={true}
@@ -327,13 +364,15 @@ const MapComponent = ({
           maxZoom={basemap.maxZoom || 19}
         />
 
-        <MapController 
+        <MapController
           filteredPoints={filteredPoints}
           selectedPoint={selectedPoint}
           activeBasemap={activeBasemap}
           activeTool={activeTool}
           setActiveTool={setActiveTool}
           zoomToTrackTrigger={zoomToTrackTrigger}
+          resizeTrigger={resizeTrigger}
+          isViewerOpen={isViewerOpen}
           viewState={viewState}
           isEmbed={isEmbed}
           setMapInstance={setMapInstance}
@@ -345,7 +384,8 @@ const MapComponent = ({
           const isSelected = selectedPoint?.id === p.id;
           if (isSelected) return null;
 
-          const color = (filterColorByDate && new Date(p.captured_at) < new Date(filterDate)) ? '#ef4444' : '#22c55e';
+          const isDefect = Boolean(p.is_defect) || (typeof p.qa_status === 'string' && p.qa_status.toLowerCase().includes('flagged')) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean));
+          const color = isDefect ? '#f97316' : (filterColorByDate && new Date(p.captured_at) < new Date(filterDate)) ? '#ef4444' : '#22c55e';
 
           return (
             <PointMarker
@@ -367,11 +407,6 @@ const MapComponent = ({
           />
         )}
       </MapContainer>
-
-      {/* Floating Controls */}
-      <div className="absolute top-3 right-3 z-[1000] flex flex-col items-end gap-3" style={{ marginRight: rightMargin, transition: 'margin-right 0.3s ease' }}>
-        <SearchBar map={mapInstance} isDark={isDark} />
-      </div>
 
       {/* Tool Guidance */}
       {activeTool && !['download', 'clear'].includes(activeTool) && (
@@ -395,7 +430,7 @@ const MapComponent = ({
 const SearchBar = ({ map, isDark }) => {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
-  
+
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!query || !map) return;
@@ -416,7 +451,7 @@ const SearchBar = ({ map, isDark }) => {
         isOpen ? "w-64 px-1" : "w-10 px-0"
       )}>
         {isOpen && (
-          <input 
+          <input
             type="text" value={query} onChange={e => setQuery(e.target.value)}
             placeholder="Search location..."
             className="flex-1 px-3 py-2 text-sm bg-transparent focus:outline-none"
@@ -432,16 +467,16 @@ const SearchBar = ({ map, isDark }) => {
 
 const CoordinateDisplay = ({ map }) => {
   const displayRef = useRef(null);
-  
+
   useEffect(() => {
     if (!map) return;
-    
+
     const update = (e) => {
       if (displayRef.current) {
         displayRef.current.innerText = `EPSG:4326 | Lat: ${e.latlng.lat.toFixed(5)}, Lon: ${e.latlng.lng.toFixed(5)}`;
       }
     };
-    
+
     map.on('mousemove', update);
     return () => {
       map.off('mousemove', update);
@@ -451,7 +486,7 @@ const CoordinateDisplay = ({ map }) => {
   if (!map) return null;
 
   return (
-    <div 
+    <div
       ref={displayRef}
       className="absolute bottom-1 right-12 z-[1000] bg-white/80 backdrop-blur-md px-2.5 py-0.5 rounded-full text-[10px] font-mono text-gray-700 border border-gray-200 shadow-sm pointer-events-none"
     >

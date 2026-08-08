@@ -60,8 +60,11 @@ const Viewer = forwardRef(({
   hotSpots = [],
   navTargets = [],
   onNavigate,
-  selectedPoint
+  selectedPoint,
+  hideToolbox = false
 }, ref) => {
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const shouldHideToolbox = hideToolbox || searchParams.get('hideToolbox') === 'true' || searchParams.get('viewerOnly') === 'true';
   const containerRef = useRef(null);
 
   // Three.js Core Refs
@@ -468,7 +471,7 @@ const Viewer = forwardRef(({
       const angles = cameraAngleRef.current;
       const now = performance.now();
 
-      const dampingFactor = 0.18;
+      const dampingFactor = 0.28;
       const yawDiff = getAngleDiff(angles.targetYaw, angles.yaw);
       angles.yaw += yawDiff * dampingFactor;
 
@@ -478,12 +481,12 @@ const Viewer = forwardRef(({
       angles.targetFov = Math.max(30, Math.min(110, angles.targetFov));
       angles.fov += (angles.targetFov - angles.fov) * dampingFactor;
 
-      // Notify parent more frequently for smooth map cone (32ms = ~30fps)
-      const shouldNotify = now - lastNotifyTime > 32;
+      // Notify parent smoothly at 60fps for hyper-responsive map cone
+      const shouldNotify = now - lastNotifyTime > 16;
       if (shouldNotify) lastNotifyTime = now;
-      
+
       applyCameraMatrix(shouldNotify);
-      
+
       // Update projected labels directly in the loop to avoid React re-renders
       if (vMidLabelRef.current && verticalHeightResult?.midPoint3D) {
         const screenPos = projectToScreen(verticalHeightResult.midPoint3D);
@@ -566,14 +569,16 @@ const Viewer = forwardRef(({
         const targetTexture = await loadGpuTexture(url);
         if (isCancelled) return;
 
-        if (!materialCurrentRef.current.map) {
+        if (!materialCurrentRef.current.map || materialCurrentRef.current.map === targetTexture) {
           materialCurrentRef.current.map = targetTexture;
           materialCurrentRef.current.needsUpdate = true;
 
-          cameraAngleRef.current.yaw = initialYaw || 0;
-          cameraAngleRef.current.targetYaw = initialYaw || 0;
-          cameraAngleRef.current.pitch = initialPitch || 0;
-          cameraAngleRef.current.targetPitch = initialPitch || 0;
+          if (!materialCurrentRef.current.map) {
+            cameraAngleRef.current.yaw = initialYaw || 0;
+            cameraAngleRef.current.targetYaw = initialYaw || 0;
+            cameraAngleRef.current.pitch = initialPitch || 0;
+            cameraAngleRef.current.targetPitch = initialPitch || 0;
+          }
 
           setIsLoading(false);
           setError(null);
@@ -711,7 +716,7 @@ const Viewer = forwardRef(({
     const angles = cameraAngleRef.current;
     const currentFov = angles.targetFov || 75;
     const fovFactor = currentFov / 75.0;
-    const sensitivity = 0.11 * fovFactor;
+    const sensitivity = 0.13 * fovFactor;
 
     const deltaYaw = dx * sensitivity;
     const deltaPitch = dy * sensitivity;
@@ -895,134 +900,157 @@ const Viewer = forwardRef(({
       )}
 
       {/* Floating Top-Left Toolbox */}
-      <div className="absolute top-4 left-4 z-30 flex flex-col items-start">
-        <button
-          onClick={() => setShowToolbox(!showToolbox)}
-          className="bg-white/90 hover:bg-white text-gray-700 px-3 py-1.5 rounded-xl shadow-md border border-gray-200/80 backdrop-blur-xl flex items-center gap-2.5 transition-all active:scale-95 group"
-        >
-          <Wrench size={15} className="text-blue-600 font-bold" />
-          <span className="font-semibold text-xs tracking-wide text-gray-800">Toolbox</span>
-          <ChevronDown
-            size={15}
-            className={`text-blue-600 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] ml-1 ${showToolbox ? 'rotate-180' : 'rotate-0'
-              }`}
-          />
-        </button>
+      {!shouldHideToolbox && (
+        <div className="absolute top-4 left-4 z-30 flex flex-col items-start">
+          <button
+            onClick={() => setShowToolbox(!showToolbox)}
+            className="bg-white/90 hover:bg-white text-gray-700 px-3 py-1.5 rounded-xl shadow-md border border-gray-200/80 backdrop-blur-xl flex items-center gap-2.5 transition-all active:scale-95 group"
+          >
+            <Wrench size={15} className="text-blue-600 font-bold" />
+            <span className="font-semibold text-xs tracking-wide text-gray-800">Toolbox</span>
+            <ChevronDown
+              size={15}
+              className={`text-blue-600 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] ml-1 ${showToolbox ? 'rotate-180' : 'rotate-0'
+                }`}
+            />
+          </button>
 
-        {/* Expanded Toolbox Dropdown with Smooth Animation */}
-        <div
-          className={`grid transition-all duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] w-[220px] ${showToolbox
+          {/* Expanded Toolbox Dropdown with Smooth Animation */}
+          <div
+            className={`grid transition-all duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] w-[220px] ${showToolbox
               ? 'grid-rows-[1fr] opacity-100 mt-1.5 pointer-events-auto'
               : 'grid-rows-[0fr] opacity-0 mt-0 pointer-events-none'
-            }`}
-        >
-          <div className="overflow-hidden">
-            <div className="bg-white/95 backdrop-blur-xl border border-gray-200/90 rounded-2xl p-1.5 shadow-2xl flex flex-col gap-1">
-              {/* 360° Vertical Height Measurement */}
-              <button
-                onClick={() => {
-                  setActiveTool(activeTool === 'vertical-height' ? null : 'vertical-height');
-                  resetVerticalMeasure();
-                }}
-                className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'vertical-height'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-              >
-                <ArrowUpDown size={15} className={activeTool === 'vertical-height' ? 'text-white' : 'text-red-500'} />
-                <div className="flex flex-col text-left">
-                  <span className="font-semibold text-[11px]">360° Vertical Height</span>
-                  <span className="text-[9px] text-gray-400 font-normal">Base (Green) & Top (Red)</span>
-                </div>
-              </button>
+              }`}
+          >
+            <div className="overflow-hidden">
+              <div className="bg-white/95 backdrop-blur-xl border border-gray-200/90 rounded-2xl p-1.5 shadow-2xl flex flex-col gap-1">
+                {/* 360° Vertical Height Measurement */}
+                <button
+                  onClick={() => {
+                    setActiveTool(activeTool === 'vertical-height' ? null : 'vertical-height');
+                    resetVerticalMeasure();
+                  }}
+                  className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'vertical-height'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                >
+                  <ArrowUpDown size={15} className={activeTool === 'vertical-height' ? 'text-white' : 'text-red-500'} />
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-[11px]">360° Vertical Height</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Base (Green) & Top (Red)</span>
+                  </div>
+                </button>
 
-              {/* 360° Polygon & Area Measurement */}
-              <button
-                onClick={() => {
-                  setActiveTool(activeTool === 'polygon-area' ? null : 'polygon-area');
-                  resetPolygonMeasure();
-                }}
-                className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'polygon-area'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-              >
-                <Hexagon size={15} className={activeTool === 'polygon-area' ? 'text-white' : 'text-pink-500'} />
-                <div className="flex flex-col text-left">
-                  <span className="font-semibold text-[11px]">360° Polygon & Area</span>
-                  <span className="text-[9px] text-gray-400 font-normal">Ground plane area (m²)</span>
-                </div>
-              </button>
+                {/* 3D Spatial Distance Measurement */}
+                <button
+                  onClick={() => {
+                    setActiveTool(activeTool === '3d-measure' ? null : '3d-measure');
+                    setP1Point(null);
+                    setP2Point(null);
+                    setDistanceResult(null);
+                  }}
+                  className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === '3d-measure'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                >
+                  <Ruler size={15} className={activeTool === '3d-measure' ? 'text-white' : 'text-blue-600'} />
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-[11px]">3D Distance Measure</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Select Point 1 & Point 2</span>
+                  </div>
+                </button>
 
-              {/* Coordinate Inspector Tool */}
-              <button
-                onClick={() => {
-                  setActiveTool(activeTool === 'coord-inspector' ? null : 'coord-inspector');
-                }}
-                className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'coord-inspector'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-              >
-                <Crosshair size={15} className={activeTool === 'coord-inspector' ? 'text-white' : 'text-emerald-500'} />
-                <div className="flex flex-col text-left">
-                  <span className="font-semibold text-[11px]">Coordinate Inspector</span>
-                  <span className="text-[9px] text-gray-400 font-normal">[Lon, Lat, Elev/Z]</span>
-                </div>
-              </button>
+                {/* 3D Polygon Area & Perimeter */}
+                <button
+                  onClick={() => {
+                    setActiveTool(activeTool === 'polygon-area' ? null : 'polygon-area');
+                    resetPolygonMeasure();
+                  }}
+                  className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'polygon-area'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                >
+                  <Hexagon size={15} className={activeTool === 'polygon-area' ? 'text-white' : 'text-purple-600'} />
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-[11px]">Polygon Area & Boundary</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Click 3+ vertices in 3D</span>
+                  </div>
+                </button>
 
-              <div className="my-1 border-t border-gray-100" />
+                {/* 3D Coordinate Inspector */}
+                <button
+                  onClick={() => {
+                    setActiveTool(activeTool === 'coord-inspector' ? null : 'coord-inspector');
+                    updateInspector(null);
+                  }}
+                  className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'coord-inspector'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                >
+                  <Crosshair size={15} className={activeTool === 'coord-inspector' ? 'text-white' : 'text-emerald-600'} />
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-[11px]">3D Point Inspector</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Hover/click for XYZ & Lat/Lng</span>
+                  </div>
+                </button>
 
-              {/* Image Lighting Settings */}
-              <button
-                onClick={() => setShowLightingControl(!showLightingControl)}
-                className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${showLightingControl
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-              >
-                <Sun size={15} className={showLightingControl ? 'text-white' : 'text-amber-500'} />
-                <div className="flex flex-col text-left">
-                  <span className="font-semibold text-[11px]">Image Lighting</span>
-                  <span className="text-[9px] text-gray-400 font-normal">Brightness & contrast</span>
-                </div>
-              </button>
+                <div className="my-1 border-t border-gray-100" />
 
-              {/* Camera Calibration Panel Toggle */}
-              <button
-                onClick={() => setShowCalibrationPanel(!showCalibrationPanel)}
-                className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${showCalibrationPanel
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-              >
-                <Sliders size={15} className={showCalibrationPanel ? 'text-white' : 'text-blue-500'} />
-                <div className="flex flex-col text-left">
-                  <span className="font-semibold text-[11px]">Camera Calibration</span>
-                  <span className="text-[9px] text-gray-400 font-normal">Yaw, Pitch, Roll & Height</span>
-                </div>
-              </button>
+                {/* Image Lighting Control Toggle */}
+                <button
+                  onClick={() => setShowLightingControl(!showLightingControl)}
+                  className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${showLightingControl
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                >
+                  <Sun size={15} className={showLightingControl ? 'text-white' : 'text-amber-500'} />
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-[11px]">Image Lighting</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Brightness & contrast</span>
+                  </div>
+                </button>
 
-              <div className="my-1 border-t border-gray-100" />
+                {/* Camera Calibration Panel Toggle */}
+                <button
+                  onClick={() => setShowCalibrationPanel(!showCalibrationPanel)}
+                  className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${showCalibrationPanel
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                >
+                  <Sliders size={15} className={showCalibrationPanel ? 'text-white' : 'text-blue-500'} />
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-[11px]">Camera Calibration</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Yaw, Pitch, Roll & Height</span>
+                  </div>
+                </button>
 
-              {/* Feature Extractor / Digitize Asset */}
-              <button
-                onClick={() => setActiveTool(activeTool === 'digitize' ? null : 'digitize')}
-                className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'digitize'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-              >
-                <MapPin size={15} className={activeTool === 'digitize' ? 'text-white' : 'text-blue-500'} />
-                <div className="flex flex-col text-left">
-                  <span className="font-semibold text-[11px]">Digitize Asset</span>
-                  <span className="text-[9px] text-gray-400 font-normal">Tag GIS features in 360°</span>
-                </div>
-              </button>
+                <div className="my-1 border-t border-gray-100" />
+
+                {/* Feature Extractor / Digitize Asset */}
+                <button
+                  onClick={() => setActiveTool(activeTool === 'digitize' ? null : 'digitize')}
+                  className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${activeTool === 'digitize'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                >
+                  <MapPin size={15} className={activeTool === 'digitize' ? 'text-white' : 'text-blue-500'} />
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-[11px]">Feature Extractor</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Extract asset & export GIS</span>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Floating Image Lighting Slider Widget Overlay */}
       {showLightingControl && (
