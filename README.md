@@ -26,20 +26,21 @@ The application supports bi-directional communication with the parent dashboard:
 
 #### 2. Key Features (Implemented & Working)
 - **High-Performance Markers**: 265 points rendered via Canvas with dynamic zoom-based scaling (smaller radius for clarity).
+- **Defect Panotrack Markers**: Points explicitly flagged as QA defects automatically render in **ORANGE (`#f97316`)** with an updated `Defect Panotrack` legend indicator, while non-defected points default to **GREEN (`#22c55e`)**.
 - **60FPS Directional Cone**: Hardware-accelerated marker with CSS-interpolated rotation synced to 360° viewer yaw.
 - **Basemap Hub**: Dynamic switcher supporting 15+ layers (Google Satellite, Esri, Carto, OSM).
-- **Dashboard Integration**: `postMessage` API throttled to 20Hz (`MAP_COORDS`, `SET_SUBGRID_FILTER`).
+- **Dashboard Integration**: `postMessage` API throttled to 20Hz (`MAP_COORDS`, `SET_SUBGRID_FILTER`, `MAP_POINT_SELECTED`).
 - **GIS Tools (Basic)**: Coordinate Display (Direct DOM updates), Nominatim Search, Auto-Fit Bounds.
 
 #### 3. Active State & Data Flow
 - **Central Hub**: `Layout.jsx` manages global state (`selectedPoint`, `filteredPoints`, `activeLayers`).
-- **Data Flow**: Supabase ➔ `Layout` (Memoized Filtering) ➔ `Map`/`Viewer`.
+- **Data Flow**: Supabase ➔ `useSupabasePoints` (maps `defect_count`, `qa_status`, `defect_flags`, and local image fallback URLs) ➔ `Layout` ➔ `Map`/`Viewer`.
 - **Optimization**: Use of `React.memo` for markers and direct DOM manipulation for coordinate overlays to prevent React render lag.
 
 #### 4. Pending Tasks & Roadmap
+- **Completed**: Orange defect panotrack marker rendering, trajectory status legend update, Supabase defect fields mapping.
 - **Next Feature**: Migrate GIS Tools (Measurement, Area, Buffer) from old logic to the optimized Leaflet/Canvas event system.
 - **Pending Bug**: Persistence of uploaded spatial layers (KML/GeoJSON) across subgrid filter changes.
-- **Integration**: Finalize `POINT_SELECTED` postMessage event to notify parent dashboard of specific frame inspection.
 
 ### 4. Configuration
 
