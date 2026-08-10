@@ -607,10 +607,10 @@ const Viewer = forwardRef(({
           materialTargetRef.current.opacity = easeProgress;
 
           cameraAngleRef.current.targetYaw = startYaw + getAngleDiff(targetYaw, startYaw) * easeProgress;
-          cameraAngleRef.current.targetFov = startFov - Math.sin(progress * Math.PI) * 12;
+          cameraAngleRef.current.targetFov = startFov;
 
           if (cameraRef.current) {
-            cameraRef.current.position.z = -Math.sin(progress * Math.PI) * 10;
+            cameraRef.current.position.set(0, 0, 0);
           }
 
           if (progress < 1.0) {
@@ -648,7 +648,7 @@ const Viewer = forwardRef(({
     return () => {
       isCancelled = true;
     };
-  }, [image, configUrl, initialYaw, resolvePanoramaUrl]);
+  }, [image, configUrl, resolvePanoramaUrl]);
 
   // Pointer Handlers
   const handlePointerDown = useCallback((e) => {

@@ -174,6 +174,19 @@ const Layout = ({ isEmbed = false }) => {
       return true;
     });
 
+    // Strictly sort points by numerical frame sequence number (e.g. N93E70-0001 -> 0002 -> 0003)
+    result.sort((a, b) => {
+      const getSeqNum = (item) => {
+        const fn = item.filename || item.image_url || '';
+        const m = String(fn).match(/-(\d+)\./);
+        return m ? parseInt(m[1], 10) : (item.id || 0);
+      };
+      const numA = getSeqNum(a);
+      const numB = getSeqNum(b);
+      if (numA !== numB) return numA - numB;
+      return (a.filename || '').localeCompare(b.filename || '');
+    });
+
     console.log(`Layout: Filtered points count: ${result.length}/${points.length} (Active Subgrid: "${activeSubgrid}")`);
     return result;
   }, [points, filterSubgrid, filterDate, filterDateStrict]);
@@ -228,79 +241,71 @@ const Layout = ({ isEmbed = false }) => {
     return Array.from(grids).sort();
   }, [points]);
 
-  // Calculate navigation hotspots (arrows on the road)
+  // Calculate navigation hotspots (arrows on the road) based on spatial direction & sonar orientation
   const navTargets = useMemo(() => {
     if (!selectedPoint || !filteredPoints.length) return [];
-
-    const currentIndex = filteredPoints.findIndex(p => p.id === selectedPoint.id);
-    if (currentIndex === -1) return [];
-
-    const spots = [];
-    // Ensure we have valid coordinates
     if (!selectedPoint.lon || !selectedPoint.lat) return [];
 
     const currentGeo = turf.point([selectedPoint.lon, selectedPoint.lat]);
+    const vehicleHeading = selectedPoint.bearing || selectedPoint.heading || 0;
 
-    // Calculate navigation targets for hover-based navigation
-    // We want the immediate "Next" point, preventing skips unless points are essentially duplicates (< 1m)
-    const MIN_DIST = 1; // Minimum distance in meters to consider a move valid
-
-    let forwardTarget = null;
-    let backwardTarget = null;
-
-    // Helper to calculate relative yaw
-    const getRelativeYaw = (absBearing, vehicleHeading) => {
-      let rel = absBearing - vehicleHeading;
+    const getRelativeYaw = (absBearing, heading) => {
+      let rel = absBearing - heading;
       while (rel > 180) rel -= 360;
       while (rel < -180) rel += 360;
       return rel;
     };
 
-    // Find Forward Target (Next in sequence)
-    for (let i = 1; i <= 5; i++) { // Reduced lookahead window since we want immediate next
-      const idx = currentIndex + i;
-      if (idx >= filteredPoints.length) break;
+    let forwardTarget = null;
+    let backwardTarget = null;
+    let minFwdDist = Infinity;
+    let minBwdDist = Infinity;
 
-      const p = filteredPoints[idx];
-      if (!p.lon || !p.lat) continue;
-
+    filteredPoints.forEach(p => {
+      if (!p.lon || !p.lat || p.id === selectedPoint.id) return;
       const targetGeo = turf.point([p.lon, p.lat]);
       const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
 
-      // Only skip if it's practically the same point (GPS jitter / stop)
-      if (dist < MIN_DIST) continue;
+      // Restrict spatial search strictly to immediate local road neighbors within 35 meters
+      if (dist > 0.2 && dist <= 35) {
+        const absBearing = turf.bearing(currentGeo, targetGeo);
+        const relYaw = getRelativeYaw(absBearing, vehicleHeading);
 
-      // Found the first valid next point
-      // Create a target object that preserves the point data but adds navigation properties
-      // We spread 'p' so that the onNavigate callback receives the full point object
-      // Set pitch to -25 to place hotspot on the road
-      // Use relative yaw to align with image center (vehicle front)
+        // Forward cone sector (-90deg to +90deg relative to vehicle direction)
+        if (Math.abs(relYaw) <= 90) {
+          if (dist < minFwdDist) {
+            minFwdDist = dist;
+            forwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+          }
+        } else { // Backward cone sector
+          if (dist < minBwdDist) {
+            minBwdDist = dist;
+            backwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+          }
+        }
+      }
+    });
+
+    // Fallback to sequential index if no spatial neighbor is found within 35m
+    const curIdx = filteredPoints.findIndex(p => p.id === selectedPoint.id);
+    if (!forwardTarget && curIdx !== -1 && curIdx + 1 < filteredPoints.length) {
+      const p = filteredPoints[curIdx + 1];
+      const targetGeo = turf.point([p.lon, p.lat]);
+      const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
       const absBearing = turf.bearing(currentGeo, targetGeo);
-      const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
+      const relYaw = getRelativeYaw(absBearing, vehicleHeading);
       forwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
-      break;
     }
 
-    // Find Backward Target (Previous in sequence)
-    for (let i = 1; i <= 5; i++) {
-      const idx = currentIndex - i;
-      if (idx < 0) break;
-
-      const p = filteredPoints[idx];
-      if (!p.lon || !p.lat) continue;
-
+    if (!backwardTarget && curIdx > 0) {
+      const p = filteredPoints[curIdx - 1];
       const targetGeo = turf.point([p.lon, p.lat]);
       const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
-
-      if (dist < MIN_DIST) continue;
-
       const absBearing = turf.bearing(currentGeo, targetGeo);
-      const relYaw = getRelativeYaw(absBearing, selectedPoint.bearing || 0);
+      const relYaw = getRelativeYaw(absBearing, vehicleHeading);
       backwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
-      break;
     }
 
-    // Return array of valid targets for Viewer to iterate
     return [forwardTarget, backwardTarget].filter(Boolean);
   }, [selectedPoint, filteredPoints]);
 
@@ -342,17 +347,103 @@ const Layout = ({ isEmbed = false }) => {
     return idx >= 0 ? idx : 0;
   }, [selectedPoint, filteredPoints]);
 
-  const handlePrevFrame = React.useCallback(() => {
-    if (currentFrameIndex > 0 && filteredPoints[currentFrameIndex - 1]) {
-      handlePointSelect(filteredPoints[currentFrameIndex - 1]);
+  const getConeDirectionalTarget = React.useCallback((isForward = true) => {
+    if (!selectedPoint || !filteredPoints || filteredPoints.length === 0) return null;
+
+    const curLat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude);
+    const curLon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng);
+    if (isNaN(curLat) || isNaN(curLon)) return null;
+
+    const currentGeo = turf.point([curLon, curLat]);
+    const vehicleBearing = parseFloat(selectedPoint.bearing ?? selectedPoint.heading ?? 0);
+    const cameraYaw = parseFloat(viewState?.yaw ?? 0);
+    
+    let coneDirection = (vehicleBearing + cameraYaw + (isForward ? 0 : 180) + 360) % 360;
+
+    let bestPoint = null;
+    let minDistance = Infinity;
+
+    filteredPoints.forEach(p => {
+      if (p.id === selectedPoint.id || (p.filename && p.filename === selectedPoint.filename)) return;
+      const pLat = parseFloat(p.lat ?? p.latitude);
+      const pLon = parseFloat(p.lon ?? p.longitude ?? p.lng);
+      if (isNaN(pLat) || isNaN(pLon)) return;
+
+      const targetGeo = turf.point([pLon, pLat]);
+      const distMeters = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+
+      if (distMeters >= 0.5 && distMeters <= 35) {
+        const absBearing = (turf.bearing(currentGeo, targetGeo) + 360) % 360;
+        let angleDiff = Math.abs(absBearing - coneDirection);
+        if (angleDiff > 180) angleDiff = 360 - angleDiff;
+
+        if (angleDiff <= 75) {
+          if (distMeters < minDistance) {
+            minDistance = distMeters;
+            bestPoint = p;
+          }
+        }
+      }
+    });
+
+    if (!bestPoint) {
+      filteredPoints.forEach(p => {
+        if (p.id === selectedPoint.id || (p.filename && p.filename === selectedPoint.filename)) return;
+        const pLat = parseFloat(p.lat ?? p.latitude);
+        const pLon = parseFloat(p.lon ?? p.longitude ?? p.lng);
+        if (isNaN(pLat) || isNaN(pLon)) return;
+
+        const targetGeo = turf.point([pLon, pLat]);
+        const distMeters = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+
+        if (distMeters >= 0.5 && distMeters <= 35) {
+          if (distMeters < minDistance) {
+            minDistance = distMeters;
+            bestPoint = p;
+          }
+        }
+      });
     }
-  }, [currentFrameIndex, filteredPoints, handlePointSelect]);
+
+    if (!bestPoint) {
+      const curIdx = filteredPoints.findIndex(p =>
+        (p.id !== undefined && p.id === selectedPoint.id) ||
+        (p.filename && selectedPoint.filename && p.filename === selectedPoint.filename)
+      );
+      if (curIdx !== -1) {
+        const nextIdx = isForward ? (curIdx + 1 < filteredPoints.length ? curIdx + 1 : 0) : (curIdx > 0 ? curIdx - 1 : filteredPoints.length - 1);
+        bestPoint = filteredPoints[nextIdx];
+      }
+    }
+
+    return bestPoint;
+  }, [selectedPoint, filteredPoints, viewState?.yaw]);
+
+  const handlePrevFrame = React.useCallback(() => {
+    if (navTargets && navTargets[1]) {
+      handlePointSelect(navTargets[1]);
+    } else {
+      let target = getConeDirectionalTarget(false);
+      if (!target && filteredPoints && filteredPoints.length > 0) {
+        const prevIdx = currentFrameIndex > 0 ? currentFrameIndex - 1 : filteredPoints.length - 1;
+        target = filteredPoints[prevIdx];
+      }
+      if (target) handlePointSelect(target);
+    }
+  }, [navTargets, getConeDirectionalTarget, currentFrameIndex, filteredPoints, handlePointSelect]);
 
   const handleNextFrame = React.useCallback(() => {
-    if (currentFrameIndex < filteredPoints.length - 1 && filteredPoints[currentFrameIndex + 1]) {
-      handlePointSelect(filteredPoints[currentFrameIndex + 1]);
+    if (navTargets && navTargets[0]) {
+      handlePointSelect(navTargets[0]);
+    } else {
+      let target = getConeDirectionalTarget(true);
+      if (!target && filteredPoints && filteredPoints.length > 0) {
+        const nextIdx = currentFrameIndex < filteredPoints.length - 1 ? currentFrameIndex + 1 : 0;
+        target = filteredPoints[nextIdx];
+      }
+      if (target) handlePointSelect(target);
     }
-  }, [currentFrameIndex, filteredPoints, handlePointSelect]);
+  }, [navTargets, getConeDirectionalTarget, currentFrameIndex, filteredPoints, handlePointSelect]);
 
   // --- Auto-Play Logic ---
   useEffect(() => {

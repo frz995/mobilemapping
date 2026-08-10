@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Camera, FileText } from 'lucide-react';
+import * as turf from '@turf/turf';
 import Layout from './components/Layout';
 import Viewer from './components/Viewer';
 import MapComponent from './components/Map';
@@ -106,14 +107,98 @@ function StandaloneViewer() {
     }
   }, []);
 
+  const getConeDirectionalTarget = React.useCallback((isForward = true) => {
+    if (!selectedPoint || !filteredPoints || filteredPoints.length === 0) return null;
+
+    const curLat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude);
+    const curLon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng);
+    if (isNaN(curLat) || isNaN(curLon)) return null;
+
+    const currentGeo = turf.point([curLon, curLat]);
+    const vehicleBearing = parseFloat(selectedPoint.bearing ?? selectedPoint.heading ?? 0);
+    const cameraYaw = parseFloat(selectedPoint.yaw ?? 0);
+    
+    // Absolute compass angle the sonar cone is facing (0deg to 360deg)
+    let coneDirection = (vehicleBearing + cameraYaw + (isForward ? 0 : 180) + 360) % 360;
+
+    let bestPoint = null;
+    let minDistance = Infinity;
+
+    // 1. Search for nearest point in the forward sector of sonar cone (< 35m distance)
+    filteredPoints.forEach(p => {
+      if (p.id === selectedPoint.id || (p.filename && p.filename === selectedPoint.filename)) return;
+      const pLat = parseFloat(p.lat ?? p.latitude);
+      const pLon = parseFloat(p.lon ?? p.longitude ?? p.lng);
+      if (isNaN(pLat) || isNaN(pLon)) return;
+
+      const targetGeo = turf.point([pLon, pLat]);
+      const distMeters = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+
+      if (distMeters >= 0.5 && distMeters <= 35) {
+        const absBearing = (turf.bearing(currentGeo, targetGeo) + 360) % 360;
+        let angleDiff = Math.abs(absBearing - coneDirection);
+        if (angleDiff > 180) angleDiff = 360 - angleDiff;
+
+        if (angleDiff <= 75) {
+          if (distMeters < minDistance) {
+            minDistance = distMeters;
+            bestPoint = p;
+          }
+        }
+      }
+    });
+
+    // 2. Fallback: Closest spatial neighbor within 35m if cone sector has no point
+    if (!bestPoint) {
+      filteredPoints.forEach(p => {
+        if (p.id === selectedPoint.id || (p.filename && p.filename === selectedPoint.filename)) return;
+        const pLat = parseFloat(p.lat ?? p.latitude);
+        const pLon = parseFloat(p.lon ?? p.longitude ?? p.lng);
+        if (isNaN(pLat) || isNaN(pLon)) return;
+
+        const targetGeo = turf.point([pLon, pLat]);
+        const distMeters = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+
+        if (distMeters >= 0.5 && distMeters <= 35) {
+          if (distMeters < minDistance) {
+            minDistance = distMeters;
+            bestPoint = p;
+          }
+        }
+      });
+    }
+
+    // 3. Fallback: Array sequence step if no spatial neighbor within 35m
+    if (!bestPoint) {
+      const curIdx = filteredPoints.findIndex(p =>
+        (p.id !== undefined && p.id === selectedPoint.id) ||
+        (p.filename && selectedPoint.filename && p.filename === selectedPoint.filename)
+      );
+      if (curIdx !== -1) {
+        const nextIdx = isForward ? (curIdx + 1 < filteredPoints.length ? curIdx + 1 : 0) : (curIdx > 0 ? curIdx - 1 : filteredPoints.length - 1);
+        bestPoint = filteredPoints[nextIdx];
+      }
+    }
+
+    return bestPoint;
+  }, [selectedPoint, filteredPoints]);
+
   const handlePrevFrame = () => {
-    const prevIdx = currentIndex > 0 ? currentIndex - 1 : filteredPoints.length - 1;
-    handlePointSelect(filteredPoints[prevIdx]);
+    let target = getConeDirectionalTarget(false);
+    if (!target && filteredPoints && filteredPoints.length > 0) {
+      const prevIdx = currentIndex > 0 ? currentIndex - 1 : filteredPoints.length - 1;
+      target = filteredPoints[prevIdx];
+    }
+    if (target) handlePointSelect(target);
   };
 
   const handleNextFrame = () => {
-    const nextIdx = currentIndex < filteredPoints.length - 1 ? currentIndex + 1 : 0;
-    handlePointSelect(filteredPoints[nextIdx]);
+    let target = getConeDirectionalTarget(true);
+    if (!target && filteredPoints && filteredPoints.length > 0) {
+      const nextIdx = currentIndex < filteredPoints.length - 1 ? currentIndex + 1 : 0;
+      target = filteredPoints[nextIdx];
+    }
+    if (target) handlePointSelect(target);
   };
 
   // Autoplay walkthrough timer

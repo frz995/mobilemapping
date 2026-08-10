@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Marker, Rectangle } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Search, Map as MapIcon, Layers, Copy, Check, X } from 'lucide-react';
@@ -162,13 +162,13 @@ const MapController = ({
     }
   }, [filteredPoints, selectedPoint, map]);
 
-  // Fly to selected point track at max zoom level (level 19)
+  // Pan map smoothly to follow active selected point on every frame step
   useEffect(() => {
     if (selectedPoint) {
       const lat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude);
       const lon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng);
       if (!isNaN(lat) && !isNaN(lon)) {
-        map.flyTo([lat, lon], 19, { animate: true, duration: 0.8 });
+        map.panTo([lat, lon], { animate: true, duration: 0.4 });
       }
     }
   }, [selectedPoint, zoomToTrackTrigger, map]);
@@ -214,10 +214,12 @@ const MapController = ({
 };
 
 // --- Memoized Point Marker for Performance ---
-const PointMarker = React.memo(({ point, radius, weight, color, onClick }) => {
+const PointMarker = React.memo(({ point, radius, weight, color, showPopup = false, onClick }) => {
   const lat = parseFloat(point.lat ?? point.latitude);
-  const lon = parseFloat(point.lon ?? point.longitude);
+  const lon = parseFloat(point.lon ?? point.longitude ?? point.lng);
   if (isNaN(lat) || isNaN(lon)) return null;
+
+  const isDefect = Boolean(point.is_defect) || (typeof point.qa_status === 'string' && point.qa_status.toLowerCase().includes('flagged')) || (point.defect_flags && typeof point.defect_flags === 'object' && Object.values(point.defect_flags).some(Boolean));
 
   return (
     <CircleMarker
@@ -234,12 +236,40 @@ const PointMarker = React.memo(({ point, radius, weight, color, onClick }) => {
         click: () => onClick(point)
       }}
     >
-      <Popup>
-        <div className="text-xs">
-          <p className="font-bold">{point.subgrid}</p>
-          <p className="text-gray-500">{new Date(point.captured_at).toLocaleDateString()}</p>
-        </div>
-      </Popup>
+      {showPopup && (
+        <Popup className="custom-panotrack-popup">
+          <div className="bg-slate-900/95 backdrop-blur-md text-slate-100 p-3 rounded-xl border border-slate-700/80 shadow-2xl min-w-[160px] select-none">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/15 text-sky-400 border border-sky-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
+                {point.subgrid || 'SUBGRID'}
+              </span>
+              {isDefect && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-amber-500/15 text-amber-400 border-amber-500/30">
+                  DEFECT
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-1 text-[11px]">
+              {point.filename && (
+                <div className="flex items-center justify-between text-slate-400 font-mono text-[10px] gap-2">
+                  <span>Image:</span>
+                  <span className="text-slate-200 font-semibold truncate max-w-[100px]" title={point.filename}>
+                    {point.filename.replace(/^.*[\\\/]/, '')}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between text-slate-400 text-[10px] gap-2">
+                <span>Date Captured:</span>
+                <span className="text-slate-300 font-medium whitespace-nowrap">
+                  {point.captured_at ? new Date(point.captured_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '09/04/2022'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </Popup>
+      )}
     </CircleMarker>
   );
 });
@@ -292,6 +322,63 @@ const SonarMarker = ({ position, yaw }) => {
   );
 };
 
+// --- BBox Rectangle Selection Layer ---
+const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
+  const [startPoint, setStartPoint] = useState(null);
+  const [currentPoint, setCurrentPoint] = useState(null);
+
+  useMapEvents({
+    click(e) {
+      if (!isActive) return;
+      if (!startPoint) {
+        setStartPoint(e.latlng);
+        setCurrentPoint(e.latlng);
+      } else {
+        const finalBounds = L.latLngBounds(startPoint, e.latlng);
+        onBoundsChange(finalBounds);
+        setStartPoint(null);
+        setCurrentPoint(null);
+      }
+    },
+    mousemove(e) {
+      if (isActive && startPoint) {
+        setCurrentPoint(e.latlng);
+      }
+    }
+  });
+
+  useEffect(() => {
+    if (!isActive) {
+      setStartPoint(null);
+      setCurrentPoint(null);
+    }
+  }, [isActive]);
+
+  if (!isActive) return null;
+
+  const activeBounds = startPoint && currentPoint ? L.latLngBounds(startPoint, currentPoint) : null;
+
+  return (
+    <>
+      {startPoint && (
+        <CircleMarker center={startPoint} radius={6} pathOptions={{ color: '#0284c7', fillColor: '#38bdf8', fillOpacity: 0.9 }} />
+      )}
+      {activeBounds && (
+        <Rectangle
+          bounds={activeBounds}
+          pathOptions={{
+            color: '#0284c7',
+            fillColor: '#38bdf8',
+            fillOpacity: 0.3,
+            weight: 2,
+            dashArray: '5, 5'
+          }}
+        />
+      )}
+    </>
+  );
+};
+
 const MapComponent = ({
   isEmbed = false,
   points = [],
@@ -316,6 +403,33 @@ const MapComponent = ({
   const { isDark } = useTheme();
   const [mapInstance, setMapInstance] = useState(null);
   const [currentZoom, setCurrentZoom] = useState(INITIAL_ZOOM);
+  const [showPanotrackData, setShowPanotrackData] = useState(true);
+  const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
+  const [dynamicDefectMap, setDynamicDefectMap] = useState({});
+  const [isBboxActive, setIsBboxActive] = useState(false);
+  const [spatialBounds, setSpatialBounds] = useState(null);
+
+  useEffect(() => {
+    const handleMessage = (e) => {
+      if (e.data?.type === 'FILTER_STATUS_TYPES') {
+        if (e.data.statusFilters) setStatusFilters(e.data.statusFilters);
+        if (typeof e.data.showPanotrackData === 'boolean') setShowPanotrackData(e.data.showPanotrackData);
+      } else if (e.data?.type === 'UPDATE_POINT_DEFECT') {
+        const fn = (e.data.filename || '').replace(/^.*[\\\/]/, '').toUpperCase();
+        if (fn) {
+          setDynamicDefectMap(prev => ({
+            ...prev,
+            [fn]: Boolean(e.data.is_defect)
+          }));
+        }
+      } else if (e.data?.type === 'TOGGLE_BBOX_DRAW') {
+        setIsBboxActive(Boolean(e.data.isDrawing));
+        if (!e.data.isDrawing) setSpatialBounds(null);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const basemap = useMemo(() => {
     return BASEMAPS.find(b => b.id === activeBasemap) || BASEMAPS[0];
@@ -348,6 +462,13 @@ const MapComponent = ({
 
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
+      {/* BBox Guidance Banner (Simple, neat, static, no animations) */}
+      {isBboxActive && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-md text-[11px] font-medium text-slate-200 shadow-md pointer-events-none">
+          {spatialBounds ? 'Spatial BBOX Filter Active' : 'Click 1st corner, then click 2nd corner on map to set BBOX'}
+        </div>
+      )}
+
       <MapContainer
         center={INITIAL_CENTER}
         zoom={INITIAL_ZOOM}
@@ -379,13 +500,33 @@ const MapComponent = ({
           setCurrentZoom={setCurrentZoom}
         />
 
-        {/* Points Layer */}
-        {isPanotrackVisible && filteredPoints.map((p) => {
-          const isSelected = selectedPoint?.id === p.id;
-          if (isSelected) return null;
+        {/* BBox Rectangle Selection Layer */}
+        <BBoxDrawLayer isActive={isBboxActive} onBoundsChange={setSpatialBounds} />
 
-          const isDefect = Boolean(p.is_defect) || (typeof p.qa_status === 'string' && p.qa_status.toLowerCase().includes('flagged')) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean));
-          const color = isDefect ? '#f97316' : (filterColorByDate && new Date(p.captured_at) < new Date(filterDate)) ? '#ef4444' : '#22c55e';
+        {/* Points Layer */}
+        {isPanotrackVisible && showPanotrackData && filteredPoints.map((p) => {
+          const lat = parseFloat(p.lat ?? p.latitude);
+          const lon = parseFloat(p.lon ?? p.longitude ?? p.lng);
+
+          if (spatialBounds && !isNaN(lat) && !isNaN(lon)) {
+            if (!spatialBounds.contains([lat, lon])) {
+              return null;
+            }
+          }
+
+          const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+          const dynamicDefect = dynamicDefectMap[fnKey];
+          const isDefect = dynamicDefect !== undefined
+            ? Boolean(dynamicDefect)
+            : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean));
+          const isStitching = (typeof p.qa_status === 'string' && p.qa_status.toLowerCase().includes('stitching')) || p.status === 'stitching';
+          const isPublished = !isDefect && !isStitching;
+
+          if (isDefect && !statusFilters.defect) return null;
+          if (isPublished && !statusFilters.published) return null;
+          if (isStitching && !statusFilters.stitching) return null;
+
+          const color = isDefect ? '#ef4444' : isStitching ? '#f59e0b' : (filterColorByDate && new Date(p.captured_at) < new Date(filterDate)) ? '#f59e0b' : '#22c55e';
 
           return (
             <PointMarker
@@ -394,6 +535,7 @@ const MapComponent = ({
               radius={markerRadius}
               weight={markerWeight}
               color={color}
+              showPopup={isEmbed}
               onClick={onPointSelect}
             />
           );
@@ -402,7 +544,10 @@ const MapComponent = ({
         {/* Selected Point Sonar */}
         {selectedPoint && (
           <SonarMarker
-            position={[parseFloat(selectedPoint.lat ?? selectedPoint.latitude), parseFloat(selectedPoint.lon ?? selectedPoint.longitude)]}
+            position={[
+              parseFloat(selectedPoint.lat ?? selectedPoint.latitude),
+              parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng)
+            ]}
             yaw={viewState?.yaw || 0}
           />
         )}

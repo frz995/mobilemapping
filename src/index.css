@@ -332,6 +332,10 @@ canvas, video, img {
   }
 }
 
+.custom-sonar-icon {
+  pointer-events: none !important;
+}
+
 .panotrack-sonar-container {
   position: relative; 
   width: 44px; 
@@ -339,7 +343,7 @@ canvas, video, img {
   display: flex; 
   align-items: center; 
   justify-content: center; 
-  pointer-events: none;
+  pointer-events: none !important;
 }
 
 .panotrack-sonar-ring {
@@ -360,5 +364,47 @@ canvas, video, img {
   background-color: #00f2ff;
   border: 2.5px solid #ffffff;
   animation: coreGlow 2.0s ease-in-out infinite;
+}
+
+/* ============================================================
+   CUSTOM LEAFLET POPUP CARD STYLING
+   ============================================================ */
+.custom-panotrack-popup .leaflet-popup-content-wrapper {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 12px !important;
+}
+
+.custom-panotrack-popup .leaflet-popup-content {
+  margin: 0 !important;
+  line-height: 1.4 !important;
+}
+
+.custom-panotrack-popup .leaflet-popup-tip-container {
+  overflow: visible !important;
+}
+
+.custom-panotrack-popup .leaflet-popup-tip {
+  background: #0f172a !important;
+  border: 1px solid rgba(51, 65, 85, 0.8) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.custom-panotrack-popup a.leaflet-popup-close-button {
+  color: #94a3b8 !important;
+  top: 8px !important;
+  right: 8px !important;
+  padding: 3px 6px !important;
+  font-size: 13px !important;
+  font-weight: bold !important;
+  z-index: 20 !important;
+}
+
+.custom-panotrack-popup a.leaflet-popup-close-button:hover {
+  color: #f1f5f9 !important;
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-radius: 6px !important;
 }
 

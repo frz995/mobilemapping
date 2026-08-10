@@ -8,18 +8,8 @@ function extractSubgrid(text) {
 }
 
 const SAMPLE_PANOTRACK_POINTS = [
-    { id: 101, subgrid: 'N90E67', filename: 'N90E67-0001.jpg', lat: 2.548550, lon: 102.815300, image_url: '/MMS_PIC/N90E67-0023.jpg', heading: 72.0, captured_at: '2026-06-20T10:01:00Z' },
-    { id: 102, subgrid: 'N90E67', filename: 'N90E67-0002.jpg', lat: 2.548580, lon: 102.815450, image_url: '/MMS_PIC/N93E70-0002.jpg', heading: 72.0, captured_at: '2026-06-20T10:02:00Z' },
-    { id: 103, subgrid: 'N90E67', filename: 'N90E67-0003.jpg', lat: 2.548610, lon: 102.815600, image_url: '/MMS_PIC/N93E70-0003.jpg', heading: 72.0, captured_at: '2026-06-20T10:03:00Z' },
-    { id: 104, subgrid: 'N90E67', filename: 'N90E67-0004.jpg', lat: 2.548640, lon: 102.815720, image_url: '/MMS_PIC/N93E70-0013.jpg', heading: 72.0, captured_at: '2026-06-20T10:04:00Z' },
-    { id: 105, subgrid: 'N90E67', filename: 'N90E67-0005.jpg', lat: 2.548660, lon: 102.815835, image_url: '/MMS_PIC/N93E70-0016.jpg', heading: 72.0, captured_at: '2026-06-20T10:05:00Z' },
-    { id: 106, subgrid: 'N90E67', filename: 'N90E67-0006.jpg', lat: 2.548680, lon: 102.815960, image_url: '/MMS_PIC/N93E70-0025.jpg', heading: 72.0, captured_at: '2026-06-20T10:06:00Z' },
-    { id: 107, subgrid: 'N90E67', filename: 'N90E67-0007.jpg', lat: 2.548700, lon: 102.816100, image_url: '/MMS_PIC/N93E70-0030.jpg', heading: 72.0, captured_at: '2026-06-20T10:07:00Z' },
-    { id: 108, subgrid: 'N90E67', filename: 'N90E67-0008.jpg', lat: 2.548720, lon: 102.816240, image_url: '/MMS_PIC/N93E70-0035.jpg', heading: 72.0, captured_at: '2026-06-20T10:08:00Z' },
-    { id: 109, subgrid: 'N90E67', filename: 'N90E67-0009.jpg', lat: 2.548740, lon: 102.816380, image_url: '/MMS_PIC/N93E70-0046.jpg', heading: 72.0, captured_at: '2026-06-20T10:09:00Z' },
-    { id: 110, subgrid: 'N90E67', filename: 'N90E67-0010.jpg', lat: 2.548760, lon: 102.816520, image_url: '/MMS_PIC/N93E70-0054.jpg', heading: 72.0, captured_at: '2026-06-20T10:10:00Z' },
-    { id: 1, subgrid: 'N94E70', filename: 'N94E70-0001.jpg', lat: 2.542421, lon: 102.807700, image_url: '/MMS_PIC/N93E70-0002.jpg', heading: 255.8, captured_at: '2026-06-20T10:05:00Z' },
-    { id: 2, subgrid: 'N93E70', filename: 'N93E70-0001.jpg', lat: 2.542429, lon: 102.807800, image_url: '/MMS_PIC/N93E70-0003.jpg', heading: 255.7, captured_at: '2026-06-21T15:40:00Z' }
+    { id: 1, subgrid: 'N93E70', filename: 'N93E70-0001.jpg', lat: 2.542429, lon: 102.807800, image_url: '/MMS_PIC/N93E70-0001.jpg', heading: 255.7, captured_at: '2026-06-21T15:40:00Z' },
+    { id: 2, subgrid: 'N94E70', filename: 'N94E70-0001.jpg', lat: 2.542421, lon: 102.807700, image_url: '/MMS_PIC/N94E70-0001.jpg', heading: 255.8, captured_at: '2026-06-20T10:05:00Z' }
 ];
 
 export function useSupabasePoints() {
@@ -34,7 +24,21 @@ export function useSupabasePoints() {
 
                 const { data, error: supabaseError } = await supabase
                     .from('panoramas_view')
-                    .select('*');
+                    .select('*')
+                    .order('filename', { ascending: true });
+
+                let qaMap = new Map();
+                try {
+                    const { data: qaData } = await supabase.from('qa_defects').select('*');
+                    if (qaData && qaData.length > 0) {
+                        qaData.forEach(q => {
+                            const k = (q.item_key || q.filename || '').replace(/^.*[\\\/]/, '').toUpperCase();
+                            if (k) qaMap.set(k, q);
+                        });
+                    }
+                } catch (e) {
+                    console.warn('qa_defects fetch notice:', e);
+                }
 
                 if (supabaseError || !data || data.length === 0) {
                     console.warn('Supabase returned no panotrack points, using default panotrack dataset.');
@@ -43,9 +47,16 @@ export function useSupabasePoints() {
                     const formattedPoints = data.map(item => {
                         const rawSubgrid = item.subgrid || extractSubgrid(item.filename || item.image_url || item.description);
                         const cleanFn = (item.filename || '').replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');
+                        const cleanFnUpper = cleanFn.toUpperCase();
+                        const qaRecord = qaMap.get(cleanFnUpper);
+
+                        const isQaDefect = qaRecord && (
+                            qaRecord.qa_status === 'flagged' ||
+                            (qaRecord.defect_flags && typeof qaRecord.defect_flags === 'object' && Object.values(qaRecord.defect_flags).some(Boolean)) ||
+                            (qaRecord.defect_count && Number(qaRecord.defect_count) > 0)
+                        );
 
                         let imageUrl = item.image_url;
-                        // Map relative paths or fallback URLs to local MMS_PIC image file if available
                         if (!imageUrl || imageUrl.endsWith('N93E70-0008.jpg')) {
                             if (cleanFn && cleanFn !== 'N93E70-0008.jpg') {
                                 imageUrl = `/MMS_PIC/${cleanFn}`;
@@ -55,17 +66,84 @@ export function useSupabasePoints() {
                             imageUrl = `/MMS_PIC/${imageUrl.replace(/^MMS_PIC\//i, '')}`;
                         }
 
+                        const isDefect = Boolean(
+                            item.is_defect === true ||
+                            item.is_defect === 1 ||
+                            isQaDefect ||
+                            (typeof item.is_defect === 'string' && item.is_defect.toLowerCase() === 'true') ||
+                            (item.defect_count && Number(item.defect_count) > 0) ||
+                            (item.defects && Number(item.defects) > 0) ||
+                            (typeof item.qa_status === 'string' && (
+                                item.qa_status.toLowerCase().includes('flag') ||
+                                item.qa_status.toLowerCase().includes('defect')
+                            ))
+                        );
+
                         return {
                             ...item,
                             subgrid: (rawSubgrid || 'UNKNOWN').toUpperCase(),
                             lon: parseFloat(item.longitude ?? item.lon),
                             lat: parseFloat(item.latitude ?? item.lat),
-                            defect_count: item.defect_count ?? item.defects ?? item.defectCount ?? 0,
-                            qa_status: item.qa_status || '',
+                            is_defect: isDefect,
+                            defect_count: isDefect ? Math.max(1, item.defect_count || 1) : 0,
+                            qa_status: isDefect ? 'flagged' : (item.qa_status || 'published'),
                             image_url: imageUrl || `/MMS_PIC/${cleanFn || 'N93E70-0002.jpg'}`
                         };
                     });
-                    setPoints(formattedPoints);
+
+                    // Continuous Road Track Sorter (< 35m step) to prevent 150m jumps across road branches
+                    const sortGeographicallyByRoadTrack = (pts) => {
+                        if (!pts || pts.length <= 1) return pts;
+                        const remaining = [...pts];
+                        remaining.sort((a, b) => {
+                            const getSeqNum = (item) => {
+                                const fn = item.filename || item.image_url || '';
+                                const m = String(fn).match(/-(\d+)\./);
+                                return m ? parseInt(m[1], 10) : (item.id || 0);
+                            };
+                            return getSeqNum(a) - getSeqNum(b);
+                        });
+
+                        const result = [];
+                        let current = remaining.shift();
+                        result.push(current);
+
+                        while (remaining.length > 0) {
+                            const curLat = parseFloat(current.lat ?? current.latitude ?? 0);
+                            const curLon = parseFloat(current.lon ?? current.longitude ?? current.lng ?? 0);
+
+                            let nearestIdx = -1;
+                            let minRoadDist = Infinity;
+
+                            for (let i = 0; i < remaining.length; i++) {
+                                const p = remaining[i];
+                                const pLat = parseFloat(p.lat ?? p.latitude ?? 0);
+                                const pLon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? 0);
+
+                                const dLat = (pLat - curLat) * 111000;
+                                const dLon = (pLon - curLon) * 111000 * Math.cos(curLat * Math.PI / 180);
+                                const distMeters = Math.sqrt(dLat * dLat + dLon * dLon);
+
+                                if (distMeters <= 35) {
+                                    if (distMeters < minRoadDist) {
+                                        minRoadDist = distMeters;
+                                        nearestIdx = i;
+                                    }
+                                }
+                            }
+
+                            if (nearestIdx !== -1) {
+                                current = remaining.splice(nearestIdx, 1)[0];
+                            } else {
+                                current = remaining.shift();
+                            }
+                            result.push(current);
+                        }
+
+                        return result;
+                    };
+
+                    setPoints(sortGeographicallyByRoadTrack(formattedPoints));
                 }
             } catch (err) {
                 console.error('Error fetching panoramas_view, falling back to sample points:', err);
