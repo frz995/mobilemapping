@@ -409,6 +409,9 @@ const MapComponent = ({
   const [isBboxActive, setIsBboxActive] = useState(false);
   const [spatialBounds, setSpatialBounds] = useState(null);
 
+  // Only show defect/in-progress colors when embedded inside the Processing Dashboard iframe
+  const isEmbeddedInDashboard = window !== window.parent;
+
   useEffect(() => {
     const handleMessage = (e) => {
       if (e.data?.type === 'FILTER_STATUS_TYPES') {
@@ -516,17 +519,23 @@ const MapComponent = ({
 
           const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
           const dynamicDefect = dynamicDefectMap[fnKey];
-          const isDefect = dynamicDefect !== undefined
-            ? Boolean(dynamicDefect)
-            : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean));
-          const isStitching = (typeof p.qa_status === 'string' && p.qa_status.toLowerCase().includes('stitching')) || p.status === 'stitching';
+
+          // In standalone WebGIS (not embedded in Dashboard), always show green
+          const isDefect = isEmbeddedInDashboard && (
+            dynamicDefect !== undefined
+              ? Boolean(dynamicDefect)
+              : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
+          );
+          const isStitching = isEmbeddedInDashboard && (
+            (typeof p.qa_status === 'string' && p.qa_status.toLowerCase().includes('stitching')) || p.status === 'stitching'
+          );
           const isPublished = !isDefect && !isStitching;
 
           if (isDefect && !statusFilters.defect) return null;
           if (isPublished && !statusFilters.published) return null;
           if (isStitching && !statusFilters.stitching) return null;
 
-          const color = isDefect ? '#ef4444' : isStitching ? '#f59e0b' : (filterColorByDate && new Date(p.captured_at) < new Date(filterDate)) ? '#f59e0b' : '#22c55e';
+          const color = isDefect ? '#ef4444' : isStitching ? '#f59e0b' : '#22c55e';
 
           return (
             <PointMarker
