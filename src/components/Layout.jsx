@@ -90,8 +90,10 @@ const Layout = ({ isEmbed = false }) => {
 
       if (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID') {
         const sub = event.data.subgrid !== undefined ? event.data.subgrid : event.data.filter || '';
-        console.log('Layout received SUBGRID_FILTER message from parent:', sub);
+        const dt = event.data.date || '';
+        console.log('Layout received SUBGRID_FILTER message from parent:', sub, dt);
         setFilterSubgrid(sub || '');
+        setFilterDate(dt || '');
       } else if (event.data.type === 'CAMERA_ROTATED') {
         setViewState(prev => ({
           ...prev,
@@ -137,16 +139,19 @@ const Layout = ({ isEmbed = false }) => {
 
   // --- Filter Logic (Lifted from Map.jsx) ---
   // Filter points based on active subgrid or date range
+  // --- Filter Logic (Lifted from Map.jsx) ---
+  // Filter points based on active subgrid or date range
   const filteredPoints = useMemo(() => {
     if (!points || points.length === 0) return [];
 
-    // Subgrid filter is strictly controlled by processing control admin/sidebar UI (filterSubgrid)
     const activeSubgrid = filterSubgrid || '';
+    const activeDate = filterDate || '';
 
-    const result = points.filter(point => {
-      // 1. Subgrid Filter (from Admin / Sidebar Filter UI)
-      if (activeSubgrid && activeSubgrid.trim() !== '') {
-        const searchTerms = activeSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(s => s);
+    // 1. Subgrid Filter
+    let subgridMatched = points;
+    if (activeSubgrid && activeSubgrid.trim() !== '') {
+      const searchTerms = activeSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+      subgridMatched = points.filter(point => {
         const pointSubgrid = (
           point.subgrid ||
           (point.filename ? point.filename.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
@@ -154,28 +159,41 @@ const Layout = ({ isEmbed = false }) => {
           (point.description ? point.description.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
           ''
         ).toLowerCase();
+        return searchTerms.some(term => pointSubgrid.includes(term));
+      });
+      if (subgridMatched.length === 0) subgridMatched = points;
+    }
 
-        if (searchTerms.length > 0) {
-          const matches = searchTerms.some(term => pointSubgrid.includes(term));
-          if (!matches) return false;
+    // 2. Date Filter (graceful fallback if date query returns 0 points)
+    if (activeDate && activeDate.trim() !== '' && subgridMatched.length > 0) {
+      const dateQuery = activeDate.trim().toLowerCase();
+      const dateMatched = subgridMatched.filter(point => {
+        const rawDate = String(point.captured_at || point.date || point.created_at || '');
+        if (!rawDate) return false;
+        const pDate = new Date(rawDate);
+        if (!isNaN(pDate.getTime())) {
+          const monthShort = pDate.toLocaleDateString('en-US', { month: 'short' }).toLowerCase();
+          const monthLong = pDate.toLocaleDateString('en-US', { month: 'long' }).toLowerCase();
+          const dayNum = String(pDate.getDate());
+          const isoDate = pDate.toISOString().slice(0, 10);
+          return (
+            dateQuery.includes(isoDate) ||
+            isoDate.includes(dateQuery) ||
+            (dateQuery.includes(monthShort) && dateQuery.includes(dayNum)) ||
+            (dateQuery.includes(monthLong) && dateQuery.includes(dayNum)) ||
+            rawDate.toLowerCase().includes(dateQuery)
+          );
         }
-      }
+        return rawDate.toLowerCase().includes(dateQuery);
+      });
 
-      // 2. Date Filter (Strict)
-      if (filterDateStrict && filterDate) {
-        const pointDate = new Date(point.captured_at);
-        const thresholdDate = new Date(filterDate);
-        if (!isNaN(pointDate.getTime()) && !isNaN(thresholdDate.getTime())) {
-          // Hide older points
-          if (pointDate < thresholdDate) return false;
-        }
+      if (dateMatched.length > 0) {
+        subgridMatched = dateMatched;
       }
-
-      return true;
-    });
+    }
 
     // Strictly sort points by numerical frame sequence number (e.g. N93E70-0001 -> 0002 -> 0003)
-    result.sort((a, b) => {
+    subgridMatched.sort((a, b) => {
       const getSeqNum = (item) => {
         const fn = item.filename || item.image_url || '';
         const m = String(fn).match(/-(\d+)\./);
@@ -187,8 +205,8 @@ const Layout = ({ isEmbed = false }) => {
       return (a.filename || '').localeCompare(b.filename || '');
     });
 
-    console.log(`Layout: Filtered points count: ${result.length}/${points.length} (Active Subgrid: "${activeSubgrid}")`);
-    return result;
+    console.log(`Layout: Filtered points count: ${subgridMatched.length}/${points.length} (Active Subgrid: "${activeSubgrid}", Date: "${activeDate}")`);
+    return subgridMatched;
   }, [points, filterSubgrid, filterDate, filterDateStrict]);
 
   const handleSnapshot = React.useCallback(async () => {

@@ -17,6 +17,11 @@ function StandaloneViewer() {
     return params.get('adminSubgrid') || params.get('filterSubgrid') || params.get('subgrid') || '';
   });
 
+  const [adminDateFilter, setAdminDateFilter] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('date') || '';
+  });
+
   const [selectedPoint, setSelectedPoint] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const paramImg = params.get('image');
@@ -38,6 +43,7 @@ function StandaloneViewer() {
     const handleMessage = (e) => {
       if (e.data?.type === 'FILTER_SUBGRID') {
         setAdminSubgridFilter(e.data.subgrid || '');
+        setAdminDateFilter(e.data.date || '');
       } else if (e.data?.type === 'MAP_POINT_SELECTED' || e.data?.type === 'SET_PANORAMA') {
         const pt = e.data.point || e.data.payload || e.data;
         if (pt) {
@@ -77,14 +83,41 @@ function StandaloneViewer() {
     }
   }, []);
 
-  // Filter points matching active admin subgrid filter (only if selected from processing control table)
+  // Filter points matching active admin subgrid filter & date filter
   const filteredPoints = useMemo(() => {
     if (!points || points.length === 0) return [selectedPoint];
     const sub = (adminSubgridFilter || '').toUpperCase().trim();
-    if (!sub) return points; // No table row selected -> show ALL project points (265)
-    const matched = points.filter(p => (p.subgrid || '').toUpperCase().trim() === sub);
-    return matched.length > 0 ? matched : points;
-  }, [points, adminSubgridFilter, selectedPoint]);
+    const dateQuery = (adminDateFilter || '').trim().toLowerCase();
+
+    let matched = points;
+    if (sub) {
+      matched = matched.filter(p => (p.subgrid || '').toUpperCase().trim() === sub);
+    }
+
+    if (dateQuery) {
+      matched = matched.filter(p => {
+        const rawDate = String(p.captured_at || p.date || p.created_at || '');
+        if (!rawDate) return true;
+        const pDate = new Date(rawDate);
+        if (!isNaN(pDate.getTime())) {
+          const monthShort = pDate.toLocaleDateString('en-US', { month: 'short' }).toLowerCase();
+          const monthLong = pDate.toLocaleDateString('en-US', { month: 'long' }).toLowerCase();
+          const dayNum = String(pDate.getDate());
+          const isoDate = pDate.toISOString().slice(0, 10);
+          return (
+            dateQuery.includes(isoDate) ||
+            isoDate.includes(dateQuery) ||
+            (dateQuery.includes(monthShort) && dateQuery.includes(dayNum)) ||
+            (dateQuery.includes(monthLong) && dateQuery.includes(dayNum)) ||
+            rawDate.toLowerCase().includes(dateQuery)
+          );
+        }
+        return rawDate.toLowerCase().includes(dateQuery);
+      });
+    }
+
+    return matched.length > 0 ? matched : (sub ? points.filter(p => (p.subgrid || '').toUpperCase().trim() === sub) : points);
+  }, [points, adminSubgridFilter, adminDateFilter, selectedPoint]);
 
   const currentIndex = useMemo(() => {
     if (!selectedPoint || !filteredPoints || filteredPoints.length === 0) return 0;
