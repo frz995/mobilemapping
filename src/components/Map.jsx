@@ -215,6 +215,7 @@ const MapController = ({
 
 // --- Memoized Point Marker for Performance ---
 const PointMarker = React.memo(({ point, radius, weight, color, showPopup = false, onClick }) => {
+  const { isDark } = useTheme();
   const lat = parseFloat(point.lat ?? point.latitude);
   const lon = parseFloat(point.lon ?? point.longitude ?? point.lng);
   if (isNaN(lat) || isNaN(lon)) return null;
@@ -238,14 +239,28 @@ const PointMarker = React.memo(({ point, radius, weight, color, showPopup = fals
     >
       {showPopup && (
         <Popup className="custom-panotrack-popup">
-          <div className="bg-slate-900/95 backdrop-blur-md text-slate-100 p-3 rounded-xl border border-slate-700/80 shadow-2xl min-w-[160px] select-none">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/15 text-sky-400 border border-sky-500/30">
+          <div className={`p-3 rounded-xl border shadow-2xl min-w-[160px] select-none ${
+            isDark
+              ? 'bg-slate-900/95 backdrop-blur-md text-slate-100 border-slate-700/80'
+              : 'bg-white backdrop-blur-md text-slate-800 border-slate-200'
+          }`}>
+            <div className={`flex items-center justify-between gap-2 border-b pb-2 mb-2 ${
+              isDark ? 'border-slate-800' : 'border-slate-200'
+            }`}>
+              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                isDark
+                  ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
+                  : 'bg-sky-100 text-sky-700 border border-sky-300'
+              }`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
                 {point.subgrid || 'SUBGRID'}
               </span>
               {isDefect && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-amber-500/15 text-amber-400 border-amber-500/30">
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
+                  isDark
+                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                    : 'bg-amber-100 text-amber-700 border border-amber-300'
+                }`}>
                   DEFECT
                 </span>
               )}
@@ -253,16 +268,24 @@ const PointMarker = React.memo(({ point, radius, weight, color, showPopup = fals
 
             <div className="space-y-1 text-[11px]">
               {point.filename && (
-                <div className="flex items-center justify-between text-slate-400 font-mono text-[10px] gap-2">
+                <div className={`flex items-center justify-between font-mono text-[10px] gap-2 ${
+                  isDark ? 'text-slate-400' : 'text-slate-500'
+                }`}>
                   <span>Image:</span>
-                  <span className="text-slate-200 font-semibold truncate max-w-[100px]" title={point.filename}>
+                  <span className={`font-semibold truncate max-w-[100px] ${
+                    isDark ? 'text-slate-200' : 'text-slate-800'
+                  }`} title={point.filename}>
                     {point.filename.replace(/^.*[\\\/]/, '')}
                   </span>
                 </div>
               )}
-              <div className="flex items-center justify-between text-slate-400 text-[10px] gap-2">
+              <div className={`flex items-center justify-between text-[10px] gap-2 ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
+              }`}>
                 <span>Date Captured:</span>
-                <span className="text-slate-300 font-medium whitespace-nowrap">
+                <span className={`font-medium whitespace-nowrap ${
+                  isDark ? 'text-slate-300' : 'text-slate-700'
+                }`}>
                   {point.captured_at ? new Date(point.captured_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '09/04/2022'}
                 </span>
               </div>
@@ -414,7 +437,13 @@ const MapComponent = ({
 
   useEffect(() => {
     const handleMessage = (e) => {
-      if (e.data?.type === 'FILTER_STATUS_TYPES') {
+      if (e.data?.type === 'SET_THEME') {
+        const theme = e.data.theme || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+        try {
+          localStorage.setItem('theme', theme);
+        } catch (err) {}
+      } else if (e.data?.type === 'FILTER_STATUS_TYPES') {
         if (e.data.statusFilters) setStatusFilters(e.data.statusFilters);
         if (typeof e.data.showPanotrackData === 'boolean') setShowPanotrackData(e.data.showPanotrackData);
       } else if (e.data?.type === 'UPDATE_POINT_DEFECT') {
