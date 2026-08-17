@@ -96,6 +96,8 @@ const CoordinatePopupContent = ({ latlng, onClose }) => {
 // --- Map Logic Controller ---
 const MapController = ({
   filteredPoints,
+  stagedOverlayPoints = [],
+  isStagingPreviewMap = false,
   selectedPoint,
   activeBasemap,
   activeTool,
@@ -144,9 +146,30 @@ const MapController = ({
     }
   }, [map, setMapInstance, setCurrentZoom]);
 
-  // Auto-fit Bounds (only when NO selectedPoint is present)
+  // Auto-fit Bounds ONLY when in CSV Import Staging Preview Map mode
   useEffect(() => {
+    if (isStagingPreviewMap && stagedOverlayPoints && stagedOverlayPoints.length > 0 && !selectedPoint) {
+      const latlngs = stagedOverlayPoints
+        .map(p => {
+          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng);
+          const lt = parseFloat(p.lat ?? p.latitude);
+          return isNaN(ln) || isNaN(lt) ? null : [lt, ln];
+        })
+        .filter(Boolean);
+
+      if (latlngs.length > 0) {
+        const bounds = L.latLngBounds(latlngs);
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+      }
+    }
+  }, [isStagingPreviewMap, stagedOverlayPoints, selectedPoint, map]);
+
+  // Initial Auto-fit for Main Dashboard Map on FIRST LOAD ONLY (never on tab switch back to dashboard)
+  useEffect(() => {
+    if (isStagingPreviewMap) return;
+    if (window.hasMainMapFitted) return;
     if (!selectedPoint && filteredPoints.length > 0) {
+      window.hasMainMapFitted = true;
       const latlngs = filteredPoints
         .map(p => {
           const ln = parseFloat(p.lon ?? p.longitude ?? p.lng);
@@ -160,7 +183,7 @@ const MapController = ({
         map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
       }
     }
-  }, [filteredPoints, selectedPoint, map]);
+  }, [isStagingPreviewMap, filteredPoints, selectedPoint, map]);
 
   // Pan map smoothly to follow active selected point on every frame step
   useEffect(() => {
@@ -440,6 +463,7 @@ const MapComponent = ({
 
   const [stagedItemsMap, setStagedItemsMap] = useState({});
   const [stagedOverlayPoints, setStagedOverlayPoints] = useState([]);
+  const [isStagingPreviewMap, setIsStagingPreviewMap] = useState(false);
 
   // Only show defect/in-progress colors when embedded inside the Processing Dashboard iframe
   const isEmbeddedInDashboard = window !== window.parent;
@@ -467,6 +491,8 @@ const MapComponent = ({
         setIsBboxActive(Boolean(e.data.isDrawing));
         if (!e.data.isDrawing) setSpatialBounds(null);
       } else if (e.data?.type === 'SET_STAGED_DATA' || e.data?.type === 'STAGED_DATA_PREVIEW') {
+        const isPreview = Boolean(e.data.isStagingPreview === true);
+        setIsStagingPreviewMap(isPreview);
         if (e.data.stagedItems && Array.isArray(e.data.stagedItems)) {
           const sMap = {};
           const extraPoints = [];
@@ -566,6 +592,8 @@ const MapComponent = ({
 
         <MapController
           filteredPoints={filteredPoints}
+          stagedOverlayPoints={stagedOverlayPoints}
+          isStagingPreviewMap={isStagingPreviewMap}
           selectedPoint={selectedPoint}
           activeBasemap={activeBasemap}
           activeTool={activeTool}
@@ -645,17 +673,15 @@ const MapComponent = ({
           );
         })}
 
-        {/* Staged Extra Overlay Points Layer (Deduplicated for 60 FPS zero-lag map performance) */}
-        {isPanotrackVisible && showPanotrackData && statusFilters.stitching && (() => {
-          const renderedFilenames = new Set(filteredPoints.map(p => (p.filename || p.image_url || '').toUpperCase().trim()).filter(Boolean));
-          const uniqueOverlay = stagedOverlayPoints.filter(p => {
-            const fn = (p.filename || p.image_url || '').toUpperCase().trim();
-            return !fn || !renderedFilenames.has(fn);
-          });
+        {/* Staged Extra Overlay Points Layer (Memoized for 60 FPS Performance) */}
+        {isPanotrackVisible && showPanotrackData && statusFilters.stitching && stagedOverlayPoints.map((p, pIdx) => {
+          const lat = parseFloat(p.lat ?? p.latitude);
+          const lon = parseFloat(p.lon ?? p.longitude ?? p.lng);
+          if (isNaN(lat) || isNaN(lon)) return null;
 
-          return uniqueOverlay.map((p) => (
+          return (
             <PointMarker
-              key={p.id || `staged-pt-${p.latitude ?? p.lat}-${p.longitude ?? p.lon}`}
+              key={p.id || `staged-pt-${lat}-${lon}-${pIdx}`}
               point={p}
               radius={markerRadius}
               weight={markerWeight}
@@ -665,8 +691,8 @@ const MapComponent = ({
               showPopup={isEmbed}
               onClick={onPointSelect}
             />
-          ));
-        })()}
+          );
+        })}
 
         {/* Selected Point Sonar */}
         {selectedPoint && (
