@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Marker, Rectangle } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Marker, Rectangle, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Search, Map as MapIcon, Layers, Copy, Check, X } from 'lucide-react';
@@ -214,27 +214,33 @@ const MapController = ({
 };
 
 // --- Memoized Point Marker for Performance ---
-const PointMarker = React.memo(({ point, radius, weight, color, showPopup = false, onClick }) => {
+const PointMarker = React.memo(({ point, radius, weight, color, opacity, fillOpacity, showPopup = false, onClick }) => {
   const { isDark } = useTheme();
   const lat = parseFloat(point.lat ?? point.latitude);
   const lon = parseFloat(point.lon ?? point.longitude ?? point.lng);
   if (isNaN(lat) || isNaN(lon)) return null;
 
   const isDefect = Boolean(point.is_defect) || (typeof point.qa_status === 'string' && point.qa_status.toLowerCase().includes('flagged')) || (point.defect_flags && typeof point.defect_flags === 'object' && Object.values(point.defect_flags).some(Boolean));
+  const isStaging = point.isStaged || point.isStagingPreview || point.isStagingSubgrid || point.status === 'in process' || point.publishToWebGIS === 'in process' || (point.publishToWebGIS && point.publishToWebGIS !== 'yes');
+
+  const finalColor = isDefect ? '#ef4444' : (color || (isStaging ? '#f59e0b' : (point.color || '#22c55e')));
+  const fOp = typeof fillOpacity === 'number' ? fillOpacity : (typeof point.fillOpacity === 'number' ? point.fillOpacity : (typeof opacity === 'number' ? opacity : (typeof point.opacity === 'number' ? point.opacity : (isStaging ? 0.5 : 1))));
+  const sOp = typeof opacity === 'number' ? opacity : (typeof point.opacity === 'number' ? point.opacity : (isStaging ? 0.5 : 1));
 
   return (
     <CircleMarker
       center={[lat, lon]}
       radius={radius}
       pathOptions={{
-        fillColor: color,
-        fillOpacity: 1,
+        fillColor: finalColor,
+        fillOpacity: fOp,
         color: '#ffffff',
+        opacity: sOp,
         weight: weight,
         className: 'panotrack-point'
       }}
       eventHandlers={{
-        click: () => onClick(point)
+        click: () => onClick && onClick(point)
       }}
     >
       {showPopup && (
@@ -432,6 +438,9 @@ const MapComponent = ({
   const [isBboxActive, setIsBboxActive] = useState(false);
   const [spatialBounds, setSpatialBounds] = useState(null);
 
+  const [stagedItemsMap, setStagedItemsMap] = useState({});
+  const [stagedOverlayPoints, setStagedOverlayPoints] = useState([]);
+
   // Only show defect/in-progress colors when embedded inside the Processing Dashboard iframe
   const isEmbeddedInDashboard = window !== window.parent;
 
@@ -457,6 +466,44 @@ const MapComponent = ({
       } else if (e.data?.type === 'TOGGLE_BBOX_DRAW') {
         setIsBboxActive(Boolean(e.data.isDrawing));
         if (!e.data.isDrawing) setSpatialBounds(null);
+      } else if (e.data?.type === 'SET_STAGED_DATA' || e.data?.type === 'STAGED_DATA_PREVIEW') {
+        if (e.data.stagedItems && Array.isArray(e.data.stagedItems)) {
+          const sMap = {};
+          const extraPoints = [];
+          e.data.stagedItems.forEach(item => {
+            const sg = (item.subgrid || '').toUpperCase().trim();
+            if (sg) {
+              sMap[sg] = {
+                status: item.status || 'in process',
+                isPublished: Boolean(item.isPublished),
+                opacity: typeof item.opacity === 'number' ? item.opacity : 0.5,
+                statusColor: item.statusColor || (item.isPublished ? '#22c55e' : '#f59e0b')
+              };
+            }
+            const pans = item.panoramas || item.points || [];
+            if (Array.isArray(pans)) {
+              pans.forEach((p, idx) => {
+                const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
+                const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                  extraPoints.push({
+                    id: `staged-${sg}-${idx}-${p.filename || idx}`,
+                    subgrid: sg,
+                    filename: p.filename || p.image_url || `${sg}-${idx}`,
+                    lat,
+                    lon,
+                    status: item.status || 'in process',
+                    isStaged: true,
+                    opacity: typeof p.opacity === 'number' ? p.opacity : (typeof item.opacity === 'number' ? item.opacity : 0.5),
+                    color: p.color || item.statusColor || '#f59e0b'
+                  });
+                }
+              });
+            }
+          });
+          setStagedItemsMap(sMap);
+          setStagedOverlayPoints(extraPoints);
+        }
       }
     };
     window.addEventListener('message', handleMessage);
@@ -548,15 +595,26 @@ const MapComponent = ({
 
           const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
           const dynamicDefect = dynamicDefectMap[fnKey];
+          const rawSub = p.subgrid || (p.filename ? p.filename.split('-')[0] : '');
+          const normSub = rawSub.toUpperCase().trim();
+          const stagedInfo = stagedItemsMap[normSub];
 
-          // In standalone WebGIS (not embedded in Dashboard), always show green
-          const isDefect = isEmbeddedInDashboard && (
+          const isDefect = (
             dynamicDefect !== undefined
               ? Boolean(dynamicDefect)
               : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
           );
-          const isStitching = isEmbeddedInDashboard && (
-            (typeof p.qa_status === 'string' && p.qa_status.toLowerCase().includes('stitching')) || p.status === 'stitching'
+          const isStitching = Boolean(
+            (stagedInfo && !stagedInfo.isPublished) ||
+            (stagedInfo && (stagedInfo.status === 'in process' || stagedInfo.publishToWebGIS === 'in process' || stagedInfo.publishToUSVPRO === 'in process')) ||
+            p.isStagingPreview ||
+            p.status === 'in process' ||
+            p.status === 'stitching' ||
+            p.publishToWebGIS === 'in process' ||
+            p.publishToUSVPRO === 'in process' ||
+            (p.publishToWebGIS && p.publishToWebGIS !== 'yes') ||
+            (p.publishToUSVPRO && p.publishToUSVPRO !== 'yes') ||
+            (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('stitching') || p.qa_status.toLowerCase().includes('process')))
           );
           const isPublished = !isDefect && !isStitching;
 
@@ -564,20 +622,51 @@ const MapComponent = ({
           if (isPublished && !statusFilters.published) return null;
           if (isStitching && !statusFilters.stitching) return null;
 
-          const color = isDefect ? '#ef4444' : isStitching ? '#f59e0b' : '#22c55e';
+          const color = isDefect
+            ? '#ef4444'
+            : isStitching
+              ? '#f59e0b'
+              : '#22c55e';
+
+          const pointOpacity = isDefect ? 1.0 : (isStitching ? 0.5 : 1.0);
 
           return (
             <PointMarker
-              key={p.id}
+              key={p.id || `pt-${lat}-${lon}`}
               point={p}
               radius={markerRadius}
               weight={markerWeight}
               color={color}
+              opacity={pointOpacity}
+              fillOpacity={pointOpacity}
               showPopup={isEmbed}
               onClick={onPointSelect}
             />
           );
         })}
+
+        {/* Staged Extra Overlay Points Layer (Deduplicated for 60 FPS zero-lag map performance) */}
+        {isPanotrackVisible && showPanotrackData && statusFilters.stitching && (() => {
+          const renderedFilenames = new Set(filteredPoints.map(p => (p.filename || p.image_url || '').toUpperCase().trim()).filter(Boolean));
+          const uniqueOverlay = stagedOverlayPoints.filter(p => {
+            const fn = (p.filename || p.image_url || '').toUpperCase().trim();
+            return !fn || !renderedFilenames.has(fn);
+          });
+
+          return uniqueOverlay.map((p) => (
+            <PointMarker
+              key={p.id || `staged-pt-${p.latitude ?? p.lat}-${p.longitude ?? p.lon}`}
+              point={p}
+              radius={markerRadius}
+              weight={markerWeight}
+              color={p.color || '#f59e0b'}
+              opacity={p.opacity || 0.5}
+              fillOpacity={p.opacity || 0.5}
+              showPopup={isEmbed}
+              onClick={onPointSelect}
+            />
+          ));
+        })()}
 
         {/* Selected Point Sonar */}
         {selectedPoint && (

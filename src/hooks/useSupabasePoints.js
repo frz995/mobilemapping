@@ -42,7 +42,7 @@ export function useSupabasePoints() {
 
                 if (supabaseError || !data || data.length === 0) {
                     console.warn('Supabase returned no panotrack points, using default panotrack dataset.');
-                    setPoints(SAMPLE_PANOTRACK_POINTS);
+                    setPoints([]);
                 } else {
                     const formattedPoints = data.map(item => {
                         const rawSubgrid = item.subgrid || extractSubgrid(item.filename || item.image_url || item.description);
@@ -147,7 +147,7 @@ export function useSupabasePoints() {
                 }
             } catch (err) {
                 console.error('Error fetching panoramas_view, falling back to sample points:', err);
-                setPoints(SAMPLE_PANOTRACK_POINTS);
+                setPoints([]);
                 setError(err.message);
             } finally {
                 setLoading(false);
