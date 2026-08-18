@@ -375,7 +375,7 @@ const Layout = ({ isEmbed = false }) => {
     const currentGeo = turf.point([curLon, curLat]);
     const vehicleBearing = parseFloat(selectedPoint.bearing ?? selectedPoint.heading ?? 0);
     const cameraYaw = parseFloat(viewState?.yaw ?? 0);
-    
+
     let coneDirection = (vehicleBearing + cameraYaw + (isForward ? 0 : 180) + 360) % 360;
 
     let bestPoint = null;
@@ -547,7 +547,7 @@ const Layout = ({ isEmbed = false }) => {
               img.src = fallbackUrl;
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       }
 
       // 2. Preload direct image_url
