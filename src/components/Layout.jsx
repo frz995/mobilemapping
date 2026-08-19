@@ -48,7 +48,20 @@ const Layout = ({ isEmbed = false }) => {
   const [customBBoxPoints, setCustomBBoxPoints] = useState(null);
   const [splitRatio, setSplitRatio] = useState(50); // 50% split
   const [activeLayers, setActiveLayers] = useState(['panotrack']);
-  const [activeBasemap, setActiveBasemap] = useState('positron');
+  const [activeBasemap, setActiveBasemap] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const urlBm = p.get('basemap');
+      if (urlBm) {
+        return urlBm === 'esri_satellite' ? 'satellite' :
+               urlBm === 'osm_standard' ? 'osm' :
+               urlBm === 'carto_dark' ? 'dark' :
+               urlBm === 'carto_light' ? 'positron' :
+               urlBm === 'google_hybrid' ? 'google-hybrid' : urlBm;
+      }
+    }
+    return 'positron';
+  });
   const [isViewerOpen, setIsViewerOpen] = useState(!isEmbed);
   const [isUserToastExpanded, setIsUserToastExpanded] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);

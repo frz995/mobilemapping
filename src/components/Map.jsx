@@ -613,7 +613,7 @@ const MapComponent = ({
         whenCreated={setMapInstance}
       >
         <TileLayer
-          key={`${basemap.id}-${customTileUrl || ''}-${overrideOpacity}`}
+          key={`${basemap.id}-${customTileUrl || ''}`}
           url={customTileUrl && (overrideBasemap === 'custom_tile' || overrideBasemap === 'custom') ? customTileUrl : basemap.url}
           attribution={basemap.attribution}
           subdomains={basemap.subdomains || ['a', 'b', 'c']}
@@ -684,14 +684,19 @@ const MapComponent = ({
               ? (customLayerColors?.stagingTrackColor || '#f59e0b')
               : (customLayerColors?.publishedTrackColor || '#22c55e');
 
-          const pointOpacity = isDefect ? 1.0 : (isStitching ? 0.5 : 1.0);
+          const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
+            ? customLayerColors.opacity
+            : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
+
+          const baseOpacity = isDefect ? 1.0 : (isStitching ? 0.7 : 1.0);
+          const pointOpacity = baseOpacity * layerOpacityMultiplier;
 
           return (
             <PointMarker
               key={p.id || `pt-${lat}-${lon}`}
               point={p}
               radius={markerRadius}
-              weight={markerWeight}
+              weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
               color={color}
               opacity={pointOpacity}
               fillOpacity={pointOpacity}
@@ -707,15 +712,21 @@ const MapComponent = ({
           const lon = parseFloat(p.lon ?? p.longitude ?? p.lng);
           if (isNaN(lat) || isNaN(lon)) return null;
 
+          const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
+            ? customLayerColors.opacity
+            : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
+
+          const pointOpacity = (p.opacity || 0.7) * layerOpacityMultiplier;
+
           return (
             <PointMarker
               key={p.id || `staged-pt-${lat}-${lon}-${pIdx}`}
               point={p}
               radius={markerRadius}
-              weight={markerWeight}
-              color={p.color || '#f59e0b'}
-              opacity={p.opacity || 0.5}
-              fillOpacity={p.opacity || 0.5}
+              weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
+              color={customLayerColors?.stagingTrackColor || p.color || '#f59e0b'}
+              opacity={pointOpacity}
+              fillOpacity={pointOpacity}
               showPopup={isEmbed}
               onClick={onPointSelect}
             />
