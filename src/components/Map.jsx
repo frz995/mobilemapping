@@ -246,7 +246,7 @@ const PointMarker = React.memo(({ point, radius, weight, color, opacity, fillOpa
   const isDefect = Boolean(point.is_defect) || (typeof point.qa_status === 'string' && point.qa_status.toLowerCase().includes('flagged')) || (point.defect_flags && typeof point.defect_flags === 'object' && Object.values(point.defect_flags).some(Boolean));
   const isStaging = point.isStaged || point.isStagingPreview || point.isStagingSubgrid || point.status === 'in process' || point.publishToWebGIS === 'in process' || (point.publishToWebGIS && point.publishToWebGIS !== 'yes');
 
-  const finalColor = isDefect ? '#ef4444' : (color || (isStaging ? '#f59e0b' : (point.color || '#22c55e')));
+  const finalColor = color || (isDefect ? '#ef4444' : (isStaging ? '#f59e0b' : (point.color || '#22c55e')));
   const fOp = typeof fillOpacity === 'number' ? fillOpacity : (typeof point.fillOpacity === 'number' ? point.fillOpacity : (typeof opacity === 'number' ? opacity : (typeof point.opacity === 'number' ? point.opacity : (isStaging ? 0.5 : 1))));
   const sOp = typeof opacity === 'number' ? opacity : (typeof point.opacity === 'number' ? point.opacity : (isStaging ? 0.5 : 1));
 
@@ -613,7 +613,7 @@ const MapComponent = ({
         whenCreated={setMapInstance}
       >
         <TileLayer
-          key={`${basemap.id}-${customTileUrl || ''}`}
+          key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}`}
           url={customTileUrl && (overrideBasemap === 'custom_tile' || overrideBasemap === 'custom') ? customTileUrl : basemap.url}
           attribution={basemap.attribution}
           subdomains={basemap.subdomains || ['a', 'b', 'c']}

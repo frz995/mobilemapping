@@ -7,11 +7,6 @@ function extractSubgrid(text) {
     return match ? match[0].toUpperCase() : '';
 }
 
-const SAMPLE_PANOTRACK_POINTS = [
-    { id: 1, subgrid: 'N93E70', filename: 'N93E70-0001.jpg', lat: 2.542429, lon: 102.807800, image_url: '/MMS_PIC/N93E70-0001.jpg', heading: 255.7, captured_at: '2026-06-21T15:40:00Z' },
-    { id: 2, subgrid: 'N94E70', filename: 'N94E70-0001.jpg', lat: 2.542421, lon: 102.807700, image_url: '/MMS_PIC/N94E70-0001.jpg', heading: 255.8, captured_at: '2026-06-20T10:05:00Z' }
-];
-
 export function useSupabasePoints() {
     const [points, setPoints] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -41,7 +36,6 @@ export function useSupabasePoints() {
                 }
 
                 if (supabaseError || !data || data.length === 0) {
-                    console.warn('Supabase returned no panotrack points, using default panotrack dataset.');
                     setPoints([]);
                 } else {
                     const formattedPoints = data.map(item => {
@@ -56,12 +50,7 @@ export function useSupabasePoints() {
                             (qaRecord.defect_count && Number(qaRecord.defect_count) > 0)
                         );
 
-                        let imageUrl = item.image_url;
-                        if (!imageUrl || imageUrl.endsWith('N93E70-0008.jpg')) {
-                            if (cleanFn && cleanFn !== 'N93E70-0008.jpg') {
-                                imageUrl = `/MMS_PIC/${cleanFn}`;
-                            }
-                        }
+                        let imageUrl = item.image_url || (cleanFn ? `/MMS_PIC/${cleanFn}` : '');
                         if (imageUrl && !imageUrl.startsWith('http') && !imageUrl.startsWith('/')) {
                             imageUrl = `/MMS_PIC/${imageUrl.replace(/^MMS_PIC\//i, '')}`;
                         }
@@ -81,13 +70,13 @@ export function useSupabasePoints() {
 
                         return {
                             ...item,
-                            subgrid: (rawSubgrid || 'UNKNOWN').toUpperCase(),
+                            subgrid: (rawSubgrid || '').toUpperCase(),
                             lon: parseFloat(item.longitude ?? item.lon),
                             lat: parseFloat(item.latitude ?? item.lat),
                             is_defect: isDefect,
                             defect_count: isDefect ? Math.max(1, item.defect_count || 1) : 0,
                             qa_status: isDefect ? 'flagged' : (item.qa_status || 'published'),
-                            image_url: imageUrl || `/MMS_PIC/${cleanFn || 'N93E70-0002.jpg'}`
+                            image_url: imageUrl || (cleanFn ? `/MMS_PIC/${cleanFn}` : '')
                         };
                     });
 
@@ -146,7 +135,7 @@ export function useSupabasePoints() {
                     setPoints(sortGeographicallyByRoadTrack(formattedPoints));
                 }
             } catch (err) {
-                console.error('Error fetching panoramas_view, falling back to sample points:', err);
+                console.error('Error fetching panoramas_view:', err);
                 setPoints([]);
                 setError(err.message);
             } finally {

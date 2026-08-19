@@ -54,10 +54,10 @@ const Layout = ({ isEmbed = false }) => {
       const urlBm = p.get('basemap');
       if (urlBm) {
         return urlBm === 'esri_satellite' ? 'satellite' :
-               urlBm === 'osm_standard' ? 'osm' :
-               urlBm === 'carto_dark' ? 'dark' :
-               urlBm === 'carto_light' ? 'positron' :
-               urlBm === 'google_hybrid' ? 'google-hybrid' : urlBm;
+          urlBm === 'osm_standard' ? 'osm' :
+            urlBm === 'carto_dark' ? 'dark' :
+              urlBm === 'carto_light' ? 'positron' :
+                urlBm === 'google_hybrid' ? 'google-hybrid' : urlBm;
       }
     }
     return 'positron';
