@@ -490,30 +490,43 @@ const MapComponent = ({
           const extraPoints = [];
           e.data.stagedItems.forEach(item => {
             const sg = (item.subgrid || '').toUpperCase().trim();
+            const isItemPub = Boolean(item.isPublished || item.publishToWebGIS === 'yes' || item.publishToUSVPRO === 'yes' || item.isSyncedWithSupabase || item.status === 'yes');
             if (sg) {
-              sMap[sg] = {
-                status: item.status || 'in process',
-                isPublished: Boolean(item.isPublished),
-                opacity: typeof item.opacity === 'number' ? item.opacity : 0.5,
-                statusColor: item.statusColor || (item.isPublished ? '#22c55e' : '#f59e0b')
-              };
+              if (!sMap[sg] || isItemPub) {
+                sMap[sg] = {
+                  status: isItemPub ? 'yes' : (item.status || 'in process'),
+                  isPublished: isItemPub,
+                  opacity: typeof item.opacity === 'number' ? item.opacity : (isItemPub ? 1.0 : 0.5),
+                  statusColor: item.statusColor || (isItemPub ? '#22c55e' : '#f59e0b')
+                };
+              }
             }
             const pans = item.panoramas || item.points || [];
             if (Array.isArray(pans)) {
               pans.forEach((p, idx) => {
+                const fn = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+                const isPanPub = Boolean(isItemPub || p.isPublished || p.publishToWebGIS === 'yes' || p.publishToUSVPRO === 'yes' || p.isSyncedWithSupabase || p.status === 'yes');
+                if (fn) {
+                  sMap[fn] = {
+                    status: isPanPub ? 'yes' : 'in process',
+                    isPublished: isPanPub,
+                    color: isPanPub ? '#22c55e' : '#f59e0b'
+                  };
+                }
                 const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
                 const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
-                if (!isNaN(lat) && !isNaN(lon)) {
+                // ONLY add to stagedOverlayPoints if it is an UNPUBLISHED candidate point!
+                if (!isNaN(lat) && !isNaN(lon) && !isPanPub) {
                   extraPoints.push({
                     id: `staged-${sg}-${idx}-${p.filename || idx}`,
                     subgrid: sg,
                     filename: p.filename || p.image_url || `${sg}-${idx}`,
                     lat,
                     lon,
-                    status: item.status || 'in process',
+                    status: 'in process',
                     isStaged: true,
-                    opacity: typeof p.opacity === 'number' ? p.opacity : (typeof item.opacity === 'number' ? item.opacity : 0.5),
-                    color: p.color || item.statusColor || '#f59e0b'
+                    opacity: 0.7,
+                    color: '#f59e0b'
                   });
                 }
               });
@@ -617,26 +630,22 @@ const MapComponent = ({
           const dynamicDefect = dynamicDefectMap[fnKey];
           const rawSub = p.subgrid || (p.filename ? p.filename.split('-')[0] : '');
           const normSub = rawSub.toUpperCase().trim();
-          const stagedInfo = stagedItemsMap[normSub];
+          const stagedInfo = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
 
           const isDefect = (
             dynamicDefect !== undefined
               ? Boolean(dynamicDefect)
               : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
           );
-          const isStitching = Boolean(
-            (stagedInfo && !stagedInfo.isPublished) ||
-            (stagedInfo && (stagedInfo.status === 'in process' || stagedInfo.publishToWebGIS === 'in process' || stagedInfo.publishToUSVPRO === 'in process')) ||
+          const isStagedPoint = Boolean(
             p.isStagingPreview ||
+            p.isStaged ||
+            (stagedInfo && !stagedInfo.isPublished) ||
             p.status === 'in process' ||
             p.status === 'stitching' ||
-            p.publishToWebGIS === 'in process' ||
-            p.publishToUSVPRO === 'in process' ||
-            (p.publishToWebGIS && p.publishToWebGIS !== 'yes') ||
-            (p.publishToUSVPRO && p.publishToUSVPRO !== 'yes') ||
-            (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('stitching') || p.qa_status.toLowerCase().includes('process')))
+            p.publishToWebGIS === 'in process'
           );
-          const isPublished = !isDefect && !isStitching;
+          const isPublished = !isDefect && !isStagedPoint;
 
           if (isDefect && !statusFilters.defect) return null;
           if (isPublished && !statusFilters.published) return null;
