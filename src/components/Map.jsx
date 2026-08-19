@@ -645,6 +645,7 @@ const MapComponent = ({
             p.status === 'stitching' ||
             p.publishToWebGIS === 'in process'
           );
+          const isStitching = !isDefect && isStagedPoint;
           const isPublished = !isDefect && !isStagedPoint;
 
           if (isDefect && !statusFilters.defect) return null;
