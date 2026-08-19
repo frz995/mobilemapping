@@ -456,6 +456,10 @@ const MapComponent = ({
   const [stagedItemsMap, setStagedItemsMap] = useState({});
   const [stagedOverlayPoints, setStagedOverlayPoints] = useState([]);
   const [isStagingPreviewMap, setIsStagingPreviewMap] = useState(false);
+  const [overrideBasemap, setOverrideBasemap] = useState(null);
+  const [overrideOpacity, setOverrideOpacity] = useState(1.0);
+  const [customTileUrl, setCustomTileUrl] = useState(null);
+  const [customLayerColors, setCustomLayerColors] = useState(null);
 
   // Only show defect/in-progress colors when embedded inside the Processing Dashboard iframe
   const isEmbeddedInDashboard = window !== window.parent;
@@ -468,6 +472,26 @@ const MapComponent = ({
         try {
           localStorage.setItem('theme', theme);
         } catch (err) { }
+      } else if (e.data?.type === 'SET_BASEMAP' || e.data?.type === 'SET_ACTIVE_BASEMAP') {
+        const bm = e.data.basemap;
+        if (bm) {
+          const mapId = bm === 'esri_satellite' ? 'satellite' :
+                        bm === 'osm_standard' ? 'osm' :
+                        bm === 'carto_dark' ? 'dark' :
+                        bm === 'carto_light' ? 'positron' :
+                        bm === 'google_hybrid' ? 'google-hybrid' : bm;
+          setOverrideBasemap(mapId);
+        }
+        if (typeof e.data.opacity === 'number') {
+          setOverrideOpacity(e.data.opacity);
+        }
+        if (e.data.customUrl) {
+          setCustomTileUrl(e.data.customUrl);
+        }
+      } else if (e.data?.type === 'SET_MAP_THEME') {
+        if (e.data.settings) {
+          setCustomLayerColors(e.data.settings);
+        }
       } else if (e.data?.type === 'FILTER_STATUS_TYPES') {
         if (e.data.statusFilters) setStatusFilters(e.data.statusFilters);
         if (typeof e.data.showPanotrackData === 'boolean') setShowPanotrackData(e.data.showPanotrackData);
@@ -542,8 +566,9 @@ const MapComponent = ({
   }, []);
 
   const basemap = useMemo(() => {
-    return BASEMAPS.find(b => b.id === activeBasemap) || BASEMAPS[0];
-  }, [activeBasemap]);
+    const targetId = overrideBasemap || activeBasemap;
+    return BASEMAPS.find(b => b.id === targetId) || BASEMAPS[0];
+  }, [overrideBasemap, activeBasemap]);
 
   const isPanotrackVisible = activeLayers.includes('panotrack');
 
@@ -588,11 +613,12 @@ const MapComponent = ({
         whenCreated={setMapInstance}
       >
         <TileLayer
-          key={basemap.id}
-          url={basemap.url}
+          key={`${basemap.id}-${customTileUrl || ''}-${overrideOpacity}`}
+          url={customTileUrl && (overrideBasemap === 'custom_tile' || overrideBasemap === 'custom') ? customTileUrl : basemap.url}
           attribution={basemap.attribution}
           subdomains={basemap.subdomains || ['a', 'b', 'c']}
           maxZoom={basemap.maxZoom || 19}
+          opacity={typeof overrideOpacity === 'number' ? overrideOpacity : 1.0}
         />
 
         <MapController
@@ -653,10 +679,10 @@ const MapComponent = ({
           if (isStitching && !statusFilters.stitching) return null;
 
           const color = isDefect
-            ? '#ef4444'
+            ? (customLayerColors?.defectTrackColor || '#ef4444')
             : isStitching
-              ? '#f59e0b'
-              : '#22c55e';
+              ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+              : (customLayerColors?.publishedTrackColor || '#22c55e');
 
           const pointOpacity = isDefect ? 1.0 : (isStitching ? 0.5 : 1.0);
 

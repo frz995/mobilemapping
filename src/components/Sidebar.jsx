@@ -60,7 +60,11 @@ const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers,
     }
   };
 
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const isPreview = searchParams.get('preview') === 'true' || searchParams.get('hideControls') === 'true';
+
   if (isEmbed) {
+    if (isPreview) return null;
     return (
       <div className="fixed inset-0 pointer-events-none z-[9000]">
         {/* Top Right: Search Bar + Basemap Switcher Perfectly Aligned */}
