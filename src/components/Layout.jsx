@@ -18,6 +18,14 @@ import * as turf from '@turf/turf';
 
 const EMPTY_HOTSPOTS = [];
 
+const parsePointCoords = (p) => {
+  if (!p) return null;
+  const lat = parseFloat(p.lat ?? p.latitude ?? p.y ?? p.northing);
+  const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x ?? p.easting);
+  if (isNaN(lat) || isNaN(lon)) return null;
+  return { lat, lon };
+};
+
 const Layout = ({ isEmbed = false }) => {
   const { user, signOut } = useAuth();
   const {
@@ -274,11 +282,13 @@ const Layout = ({ isEmbed = false }) => {
 
   // Calculate navigation hotspots (arrows on the road) based on spatial direction & sonar orientation
   const navTargets = useMemo(() => {
-    if (!selectedPoint || !filteredPoints.length) return [];
-    if (!selectedPoint.lon || !selectedPoint.lat) return [];
+    if (!selectedPoint || !filteredPoints || !filteredPoints.length) return [];
 
-    const currentGeo = turf.point([selectedPoint.lon, selectedPoint.lat]);
-    const vehicleHeading = selectedPoint.bearing || selectedPoint.heading || 0;
+    const cur = parsePointCoords(selectedPoint);
+    if (!cur) return [];
+
+    const currentGeo = turf.point([cur.lon, cur.lat]);
+    const vehicleHeading = parseFloat(selectedPoint.bearing ?? selectedPoint.heading ?? 0);
 
     const getRelativeYaw = (absBearing, heading) => {
       let rel = absBearing - heading;
@@ -293,8 +303,11 @@ const Layout = ({ isEmbed = false }) => {
     let minBwdDist = Infinity;
 
     filteredPoints.forEach(p => {
-      if (!p.lon || !p.lat || p.id === selectedPoint.id) return;
-      const targetGeo = turf.point([p.lon, p.lat]);
+      if (p.id === selectedPoint.id) return;
+      const targetCoords = parsePointCoords(p);
+      if (!targetCoords) return;
+
+      const targetGeo = turf.point([targetCoords.lon, targetCoords.lat]);
       const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
 
       // Restrict spatial search strictly to immediate local road neighbors within 35 meters
@@ -321,20 +334,26 @@ const Layout = ({ isEmbed = false }) => {
     const curIdx = filteredPoints.findIndex(p => p.id === selectedPoint.id);
     if (!forwardTarget && curIdx !== -1 && curIdx + 1 < filteredPoints.length) {
       const p = filteredPoints[curIdx + 1];
-      const targetGeo = turf.point([p.lon, p.lat]);
-      const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
-      const absBearing = turf.bearing(currentGeo, targetGeo);
-      const relYaw = getRelativeYaw(absBearing, vehicleHeading);
-      forwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+      const targetCoords = parsePointCoords(p);
+      if (targetCoords) {
+        const targetGeo = turf.point([targetCoords.lon, targetCoords.lat]);
+        const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+        const absBearing = turf.bearing(currentGeo, targetGeo);
+        const relYaw = getRelativeYaw(absBearing, vehicleHeading);
+        forwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+      }
     }
 
     if (!backwardTarget && curIdx > 0) {
       const p = filteredPoints[curIdx - 1];
-      const targetGeo = turf.point([p.lon, p.lat]);
-      const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
-      const absBearing = turf.bearing(currentGeo, targetGeo);
-      const relYaw = getRelativeYaw(absBearing, vehicleHeading);
-      backwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+      const targetCoords = parsePointCoords(p);
+      if (targetCoords) {
+        const targetGeo = turf.point([targetCoords.lon, targetCoords.lat]);
+        const dist = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
+        const absBearing = turf.bearing(currentGeo, targetGeo);
+        const relYaw = getRelativeYaw(absBearing, vehicleHeading);
+        backwardTarget = { ...p, yaw: relYaw, pitch: -25, distance: dist };
+      }
     }
 
     return [forwardTarget, backwardTarget].filter(Boolean);
@@ -381,11 +400,10 @@ const Layout = ({ isEmbed = false }) => {
   const getConeDirectionalTarget = React.useCallback((isForward = true) => {
     if (!selectedPoint || !filteredPoints || filteredPoints.length === 0) return null;
 
-    const curLat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude);
-    const curLon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng);
-    if (isNaN(curLat) || isNaN(curLon)) return null;
+    const cur = parsePointCoords(selectedPoint);
+    if (!cur) return null;
 
-    const currentGeo = turf.point([curLon, curLat]);
+    const currentGeo = turf.point([cur.lon, cur.lat]);
     const vehicleBearing = parseFloat(selectedPoint.bearing ?? selectedPoint.heading ?? 0);
     const cameraYaw = parseFloat(viewState?.yaw ?? 0);
 
@@ -396,11 +414,10 @@ const Layout = ({ isEmbed = false }) => {
 
     filteredPoints.forEach(p => {
       if (p.id === selectedPoint.id || (p.filename && p.filename === selectedPoint.filename)) return;
-      const pLat = parseFloat(p.lat ?? p.latitude);
-      const pLon = parseFloat(p.lon ?? p.longitude ?? p.lng);
-      if (isNaN(pLat) || isNaN(pLon)) return;
+      const targetCoords = parsePointCoords(p);
+      if (!targetCoords) return;
 
-      const targetGeo = turf.point([pLon, pLat]);
+      const targetGeo = turf.point([targetCoords.lon, targetCoords.lat]);
       const distMeters = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
 
       if (distMeters >= 0.5 && distMeters <= 35) {
@@ -420,11 +437,10 @@ const Layout = ({ isEmbed = false }) => {
     if (!bestPoint) {
       filteredPoints.forEach(p => {
         if (p.id === selectedPoint.id || (p.filename && p.filename === selectedPoint.filename)) return;
-        const pLat = parseFloat(p.lat ?? p.latitude);
-        const pLon = parseFloat(p.lon ?? p.longitude ?? p.lng);
-        if (isNaN(pLat) || isNaN(pLon)) return;
+        const targetCoords = parsePointCoords(p);
+        if (!targetCoords) return;
 
-        const targetGeo = turf.point([pLon, pLat]);
+        const targetGeo = turf.point([targetCoords.lon, targetCoords.lat]);
         const distMeters = turf.distance(currentGeo, targetGeo, { units: 'kilometers' }) * 1000;
 
         if (distMeters >= 0.5 && distMeters <= 35) {
@@ -451,30 +467,20 @@ const Layout = ({ isEmbed = false }) => {
   }, [selectedPoint, filteredPoints, viewState?.yaw]);
 
   const handlePrevFrame = React.useCallback(() => {
-    if (navTargets && navTargets[1]) {
-      handlePointSelect(navTargets[1]);
-    } else {
-      let target = getConeDirectionalTarget(false);
-      if (!target && filteredPoints && filteredPoints.length > 0) {
-        const prevIdx = currentFrameIndex > 0 ? currentFrameIndex - 1 : filteredPoints.length - 1;
-        target = filteredPoints[prevIdx];
-      }
-      if (target) handlePointSelect(target);
+    if (!filteredPoints || filteredPoints.length === 0) return;
+    if (currentFrameIndex > 0) {
+      handlePointSelect(filteredPoints[currentFrameIndex - 1]);
     }
-  }, [navTargets, getConeDirectionalTarget, currentFrameIndex, filteredPoints, handlePointSelect]);
+  }, [currentFrameIndex, filteredPoints, handlePointSelect]);
 
   const handleNextFrame = React.useCallback(() => {
-    if (navTargets && navTargets[0]) {
-      handlePointSelect(navTargets[0]);
+    if (!filteredPoints || filteredPoints.length === 0) return;
+    if (currentFrameIndex < filteredPoints.length - 1) {
+      handlePointSelect(filteredPoints[currentFrameIndex + 1]);
     } else {
-      let target = getConeDirectionalTarget(true);
-      if (!target && filteredPoints && filteredPoints.length > 0) {
-        const nextIdx = currentFrameIndex < filteredPoints.length - 1 ? currentFrameIndex + 1 : 0;
-        target = filteredPoints[nextIdx];
-      }
-      if (target) handlePointSelect(target);
+      setIsPlaying(false); // Stop autoplay when reaching the final frame
     }
-  }, [navTargets, getConeDirectionalTarget, currentFrameIndex, filteredPoints, handlePointSelect]);
+  }, [currentFrameIndex, filteredPoints, handlePointSelect]);
 
   // --- Auto-Play Logic ---
   useEffect(() => {

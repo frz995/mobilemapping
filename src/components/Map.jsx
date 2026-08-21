@@ -2,18 +2,25 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Marker, Rectangle, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, Map as MapIcon, Layers, Copy, Check, X } from 'lucide-react';
+import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+import { Search, Map as MapIcon, Layers, Copy, Check, X, Box } from 'lucide-react';
 import * as turf from '@turf/turf';
 import proj4 from 'proj4';
 import { useTheme } from '../context/ThemeContext';
 import { BASEMAPS } from '../config/basemaps';
 import clsx from 'clsx';
 
+// Set worker before initializing map
+if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
+  maplibregl.setWorkerUrl(workerUrl);
+}
+
 // --- Constants & Config ---
-const INITIAL_CENTER = [2.54866, 102.815835]; // Center of the 265 points found in previous session
+const INITIAL_CENTER = [2.54866, 102.815835]; // Center of the survey points
 const INITIAL_ZOOM = 16;
 
-// --- Helper: Coordinate Conversion ---
 const toDMS = (deg, type) => {
   const d = Math.floor(Math.abs(deg));
   const minfloat = (Math.abs(deg) - d) * 60;
@@ -21,6 +28,21 @@ const toDMS = (deg, type) => {
   const s = ((minfloat - m) * 60).toFixed(2);
   const dir = deg > 0 ? (type === 'lat' ? 'N' : 'E') : (type === 'lat' ? 'S' : 'W');
   return `${d}° ${m}' ${s}" ${dir}`;
+};
+
+const extractCoordinates = (p) => {
+  if (!p) return null;
+  const lat = parseFloat(p.lat ?? p.latitude ?? p.y ?? p.northing);
+  const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x ?? p.easting);
+  if (isNaN(lat) || isNaN(lon)) return null;
+  return { lat, lon };
+};
+
+const formatTileUrl = (url) => {
+  let u = url || '';
+  if (u.includes('{s}')) u = u.replace('{s}', 'a');
+  if (u.includes('{r}')) u = u.replace('{r}', '');
+  return u;
 };
 
 // --- Coordinate Popup Component ---
@@ -93,7 +115,7 @@ const CoordinatePopupContent = ({ latlng, onClose }) => {
   );
 };
 
-// --- Map Logic Controller ---
+// --- Map Logic Controller for 2D Leaflet ---
 const MapController = ({
   filteredPoints,
   stagedOverlayPoints = [],
@@ -108,26 +130,20 @@ const MapController = ({
   viewState,
   isEmbed,
   setMapInstance,
-  setCurrentZoom
+  setCurrentZoom,
+  onMapMoved
 }) => {
   const map = useMap();
 
-  // Auto-invalidate map size on container resize, splitter drag, or viewer toggle
   useEffect(() => {
     if (!map) return;
-
     map.invalidateSize();
     const t1 = setTimeout(() => map.invalidateSize(), 100);
     const t2 = setTimeout(() => map.invalidateSize(), 300);
-
     const container = map.getContainer();
     if (!container) return () => { clearTimeout(t1); clearTimeout(t2); };
-
-    const observer = new ResizeObserver(() => {
-      map.invalidateSize();
-    });
+    const observer = new ResizeObserver(() => { map.invalidateSize(); });
     observer.observe(container);
-
     return () => {
       observer.disconnect();
       clearTimeout(t1);
@@ -138,21 +154,31 @@ const MapController = ({
   useEffect(() => {
     if (map) {
       setMapInstance(map);
-      window.MAP = map; // For debugging
+      window.MAP = map;
 
-      const onZoom = () => setCurrentZoom(map.getZoom());
+      const onZoom = () => {
+        setCurrentZoom(map.getZoom());
+        if (onMapMoved) onMapMoved(map.getCenter(), map.getZoom());
+      };
+      const onMove = () => {
+        if (onMapMoved) onMapMoved(map.getCenter(), map.getZoom());
+      };
+
       map.on('zoomend', onZoom);
-      return () => map.off('zoomend', onZoom);
+      map.on('moveend', onMove);
+      return () => {
+        map.off('zoomend', onZoom);
+        map.off('moveend', onMove);
+      };
     }
-  }, [map, setMapInstance, setCurrentZoom]);
+  }, [map, setMapInstance, setCurrentZoom, onMapMoved]);
 
-  // Auto-fit Bounds ONLY when in CSV Import Staging Preview Map mode
   useEffect(() => {
     if (isStagingPreviewMap && stagedOverlayPoints && stagedOverlayPoints.length > 0 && !selectedPoint) {
       const latlngs = stagedOverlayPoints
         .map(p => {
-          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng);
-          const lt = parseFloat(p.lat ?? p.latitude);
+          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+          const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
           return isNaN(ln) || isNaN(lt) ? null : [lt, ln];
         })
         .filter(Boolean);
@@ -164,16 +190,15 @@ const MapController = ({
     }
   }, [isStagingPreviewMap, stagedOverlayPoints, selectedPoint, map]);
 
-  // Initial Auto-fit for Main Dashboard Map on FIRST LOAD ONLY (never on tab switch back to dashboard)
   useEffect(() => {
     if (isStagingPreviewMap) return;
     if (window.hasMainMapFitted) return;
-    if (!selectedPoint && filteredPoints.length > 0) {
+    if (!selectedPoint && filteredPoints && filteredPoints.length > 0) {
       window.hasMainMapFitted = true;
       const latlngs = filteredPoints
         .map(p => {
-          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng);
-          const lt = parseFloat(p.lat ?? p.latitude);
+          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+          const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
           return isNaN(ln) || isNaN(lt) ? null : [lt, ln];
         })
         .filter(Boolean);
@@ -185,18 +210,16 @@ const MapController = ({
     }
   }, [isStagingPreviewMap, filteredPoints, selectedPoint, map]);
 
-  // Pan map smoothly to follow active selected point on every frame step
   useEffect(() => {
     if (selectedPoint) {
-      const lat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude);
-      const lon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng);
+      const lat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude ?? selectedPoint.y);
+      const lon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng ?? selectedPoint.x);
       if (!isNaN(lat) && !isNaN(lon)) {
         map.panTo([lat, lon], { animate: true, duration: 0.4 });
       }
     }
   }, [selectedPoint, zoomToTrackTrigger, map]);
 
-  // Listen for map-fly-to events from search
   useEffect(() => {
     const handleFlyTo = (e) => {
       if (map && e.detail && typeof e.detail.lat === 'number' && typeof e.detail.lon === 'number') {
@@ -207,13 +230,12 @@ const MapController = ({
     return () => window.removeEventListener('map-fly-to', handleFlyTo);
   }, [map]);
 
-  // Throttled postMessage for Dashboard
   const lastPostTimeRef = useRef(0);
 
   useMapEvents({
     mousemove: (e) => {
       const now = performance.now();
-      if (isEmbed && now - lastPostTimeRef.current > 50) { // 20Hz limit
+      if (isEmbed && now - lastPostTimeRef.current > 50) {
         window.parent.postMessage({
           type: 'MAP_COORDS',
           lat: e.latlng.lat,
@@ -227,7 +249,7 @@ const MapController = ({
       if (activeTool === 'coordinate') {
         L.popup({ maxWidth: 300 })
           .setLatLng(e.latlng)
-          .setContent(L.DomUtil.create('div')) // Placeholder for React portal if needed, but we use native for now
+          .setContent(L.DomUtil.create('div'))
           .openOn(map);
       }
     }
@@ -236,11 +258,11 @@ const MapController = ({
   return null;
 };
 
-// --- Memoized Point Marker for Performance ---
+// --- Point Marker Component ---
 const PointMarker = React.memo(({ point, radius, weight, color, opacity, fillOpacity, showPopup = false, onClick }) => {
   const { isDark } = useTheme();
-  const lat = parseFloat(point.lat ?? point.latitude);
-  const lon = parseFloat(point.lon ?? point.longitude ?? point.lng);
+  const lat = parseFloat(point.lat ?? point.latitude ?? point.y);
+  const lon = parseFloat(point.lon ?? point.longitude ?? point.lng ?? point.x);
   if (isNaN(lat) || isNaN(lon)) return null;
 
   const isDefect = Boolean(point.is_defect) || (typeof point.qa_status === 'string' && point.qa_status.toLowerCase().includes('flagged')) || (point.defect_flags && typeof point.defect_flags === 'object' && Object.values(point.defect_flags).some(Boolean));
@@ -269,22 +291,21 @@ const PointMarker = React.memo(({ point, radius, weight, color, opacity, fillOpa
       {showPopup && (
         <Popup className="custom-panotrack-popup">
           <div className={`p-3 rounded-xl border shadow-2xl min-w-[160px] select-none ${isDark
-              ? 'bg-slate-900/95 backdrop-blur-md text-slate-100 border-slate-700/80'
-              : 'bg-white backdrop-blur-md text-slate-800 border-slate-200'
+            ? 'bg-slate-900/95 backdrop-blur-md text-slate-100 border-slate-700/80'
+            : 'bg-white backdrop-blur-md text-slate-800 border-slate-200'
             }`}>
-            <div className={`flex items-center justify-between gap-2 border-b pb-2 mb-2 ${isDark ? 'border-slate-800' : 'border-slate-200'
-              }`}>
+            <div className={`flex items-center justify-between gap-2 border-b pb-2 mb-2 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold ${isDark
-                  ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
-                  : 'bg-sky-100 text-sky-700 border border-sky-300'
+                ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
+                : 'bg-sky-100 text-sky-700 border border-sky-300'
                 }`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
                 {point.subgrid || 'SUBGRID'}
               </span>
               {isDefect && (
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${isDark
-                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                    : 'bg-amber-100 text-amber-700 border border-amber-300'
+                  ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                  : 'bg-amber-100 text-amber-700 border border-amber-300'
                   }`}>
                   DEFECT
                 </span>
@@ -293,20 +314,16 @@ const PointMarker = React.memo(({ point, radius, weight, color, opacity, fillOpa
 
             <div className="space-y-1 text-[11px]">
               {point.filename && (
-                <div className={`flex items-center justify-between font-mono text-[10px] gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}>
+                <div className={`flex items-center justify-between font-mono text-[10px] gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   <span>Image:</span>
-                  <span className={`font-semibold truncate max-w-[100px] ${isDark ? 'text-slate-200' : 'text-slate-800'
-                    }`} title={point.filename}>
+                  <span className={`font-semibold truncate max-w-[100px] ${isDark ? 'text-slate-200' : 'text-slate-800'}`} title={point.filename}>
                     {point.filename.replace(/^.*[\\\/]/, '')}
                   </span>
                 </div>
               )}
-              <div className={`flex items-center justify-between text-[10px] gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}>
+              <div className={`flex items-center justify-between text-[10px] gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 <span>Date Captured:</span>
-                <span className={`font-medium whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-700'
-                  }`}>
+                <span className={`font-medium whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                   {point.captured_at ? new Date(point.captured_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '09/04/2022'}
                 </span>
               </div>
@@ -318,11 +335,10 @@ const PointMarker = React.memo(({ point, radius, weight, color, opacity, fillOpa
   );
 });
 
-// --- Sonar Marker Component for 60FPS Rotation ---
+// --- Sonar Marker Component (2D Leaflet) ---
 const SonarMarker = ({ position, yaw }) => {
   const markerRef = useRef(null);
 
-  // Use a stable icon - we'll rotate the internal element via CSS
   const sonarIcon = useMemo(() => L.divIcon({
     className: 'custom-sonar-icon',
     html: `
@@ -345,7 +361,6 @@ const SonarMarker = ({ position, yaw }) => {
     iconAnchor: [22, 22]
   }), []);
 
-  // Smooth direct DOM rotation
   useEffect(() => {
     if (markerRef.current) {
       const el = markerRef.current.getElement();
@@ -423,6 +438,304 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
   );
 };
 
+// --- WebGL 3D Terrain Viewport (MapLibre Engine) ---
+const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved }) => {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const sonarMarkerRef = useRef(null);
+  const sonarConeRef = useRef(null);
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
+
+  // Robust Coordinate Extractor (Handles lat/lng, latitude/longitude, y/x, arrays)
+  const getCoords = useCallback((pt) => {
+    if (!pt) return null;
+    if (Array.isArray(pt) && pt.length >= 2) {
+      const lat = parseFloat(pt[0]);
+      const lon = parseFloat(pt[1]);
+      return (!isNaN(lat) && !isNaN(lon)) ? { lat, lon } : null;
+    }
+    const lat = parseFloat(pt.lat ?? pt.latitude ?? pt.y);
+    const lon = parseFloat(pt.lon ?? pt.lng ?? pt.longitude ?? pt.x);
+    if (isNaN(lat) || isNaN(lon)) return null;
+    return { lat, lon };
+  }, []);
+
+  const getGeoJSON = useCallback((ptsList) => {
+    const features = (ptsList || []).map((p, idx) => {
+      const coords = getCoords(p);
+      if (!coords) return null;
+      return {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [coords.lon, coords.lat] },
+        properties: {
+          id: p.id || idx,
+          rawPoint: JSON.stringify(p),
+          color: p.color || '#22c55e'
+        }
+      };
+    }).filter(Boolean);
+
+    return { type: 'FeatureCollection', features };
+  }, [getCoords]);
+
+  // Format MapLibre Tile URLs (expands {s} to standard a,b,c subdomains)
+  const getFormattedTileUrls = useCallback((url) => {
+    if (!url) return ['https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png'];
+    if (url.includes('{s}')) {
+      return ['a', 'b', 'c'].map(s => url.replace('{s}', s));
+    }
+    return [url];
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const initialTileUrls = getFormattedTileUrls(basemap?.url);
+
+    // 1. Initialize top-down (0° pitch) at a slightly higher altitude
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: {
+        version: 8,
+        sources: {
+          'raster-tiles': {
+            type: 'raster',
+            tiles: initialTileUrls,
+            tileSize: 256,
+            attribution: basemap?.attribution || ''
+          },
+          'terrain-dem': {
+            type: 'raster-dem',
+            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+            encoding: 'terrarium',
+            tileSize: 256,
+            maxzoom: 15
+          },
+          'openmaptiles': {
+            type: 'vector',
+            url: 'https://tiles.openfreemap.org/planet'
+          }
+        },
+        layers: [
+          {
+            id: 'raster-layer',
+            type: 'raster',
+            source: 'raster-tiles',
+            paint: {
+              'raster-opacity': typeof overrideOpacity === 'number' ? overrideOpacity : 1.0
+            }
+          },
+          {
+            id: '3d-buildings',
+            source: 'openmaptiles',
+            'source-layer': 'building',
+            type: 'fill-extrusion',
+            minzoom: 14,
+            paint: {
+              'fill-extrusion-height': [
+                'interpolate', ['linear'], ['zoom'],
+                14, 0,
+                14.5, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]
+              ],
+              'fill-extrusion-base': [
+                'interpolate', ['linear'], ['zoom'],
+                14, 0,
+                14.5, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]
+              ],
+              'fill-extrusion-color': '#cbd5e1',
+              'fill-extrusion-opacity': 0.85
+            }
+          }
+        ]
+      },
+      center: [center[1], center[0]],
+      zoom: Math.max(zoom - 0.8, 12), // Start slightly zoomed out for the dive-in
+      pitch: 60,                       // Start completely flat like 2D
+      bearing: -20,                     // Start facing North
+      maxPitch: 85
+    });
+
+    mapRef.current = map;
+
+    map.on('load', () => {
+      map.resize();
+      map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+
+      map.addSource('pts-3d', {
+        type: 'geojson',
+        data: getGeoJSON(pointsRef.current)
+      });
+
+      map.addLayer({
+        id: 'pts-3d-layer',
+        type: 'circle',
+        source: 'pts-3d',
+        paint: {
+          'circle-radius': 6,
+          'circle-color': ['coalesce', ['get', 'color'], '#22c55e'],
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+          'circle-pitch-alignment': 'viewport',
+          'circle-pitch-scale': 'viewport'
+        }
+      });
+
+      map.on('click', 'pts-3d-layer', (e) => {
+        if (e.features && e.features[0]) {
+          try {
+            onPointSelect(JSON.parse(e.features[0].properties.rawPoint));
+          } catch (err) {
+            onPointSelect(e.features[0].properties);
+          }
+        }
+      });
+
+      map.on('mouseenter', 'pts-3d-layer', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'pts-3d-layer', () => { map.getCanvas().style.cursor = ''; });
+
+      update3DSonar();
+
+      // 2. Cinematic Camera Drop: swoops down into 3D pitch and target zoom
+      map.flyTo({
+        pitch: 60,
+        bearing: -20,
+        zoom: zoom,
+        duration: 1600,
+        easing: (t) => t * (2 - t), // Smooth quad ease-out dive
+        essential: true
+      });
+    });
+
+    map.on('moveend', () => {
+      const c = map.getCenter();
+      if (onMapMoved) onMapMoved([c.lat, c.lng], map.getZoom());
+    });
+
+    return () => map.remove();
+  }, []);
+
+  // Update GeoJSON source when points change
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    const source = map.getSource('pts-3d');
+    if (source) {
+      source.setData(getGeoJSON(points));
+    }
+  }, [points, getGeoJSON]);
+
+  // Reactive Basemap Tile Update
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    const newTiles = getFormattedTileUrls(basemap?.url);
+    const source = map.getSource('raster-tiles');
+
+    if (source && typeof source.setTiles === 'function') {
+      source.setTiles(newTiles);
+    }
+
+    if (map.getLayer('raster-layer')) {
+      const opacity = typeof overrideOpacity === 'number' ? overrideOpacity : 1.0;
+      map.setPaintProperty('raster-layer', 'raster-opacity', opacity);
+    }
+  }, [basemap, overrideOpacity, getFormattedTileUrls]);
+
+  // Synchronize 3D Sonar directly to Selected Point Coordinates
+  // Synchronize 3D Sonar directly to Selected Point Coordinates
+  const update3DSonar = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !selectedPoint) {
+      if (sonarMarkerRef.current) {
+        sonarMarkerRef.current.remove();
+        sonarMarkerRef.current = null;
+      }
+      return;
+    }
+
+    const coords = getCoords(selectedPoint);
+    if (!coords) return;
+
+    const targetLngLat = [coords.lon, coords.lat];
+
+    if (!sonarMarkerRef.current) {
+      const el = document.createElement('div');
+      el.className = 'panotrack-sonar-container';
+      el.style.width = '52px';
+      el.style.height = '52px';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.innerHTML = `
+        <div class="cone-rotator-wrapper" style="position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+          <svg viewBox="0 0 100 100" width="52" height="52" style="overflow: visible;">
+            <defs>
+              <linearGradient id="gradSonar3D" x1="0%" y1="100%" x2="0%" y2="0%">
+                <stop offset="0%" style="stop-color:#00f2ff;stop-opacity:0" />
+                <stop offset="100%" style="stop-color:#00f2ff;stop-opacity:0.65" />
+              </linearGradient>
+            </defs>
+            <path d="M 50 50 L 15 10 A 50 50 0 0 1 85 10 Z" fill="url(#gradSonar3D)" stroke="none" />
+          </svg>
+        </div>
+        <div class="panotrack-sonar-core" style="width: 10px; height: 10px; border-radius: 50%; background: #00f2ff; box-shadow: 0 0 8px #00f2ff; z-index: 10;"></div>
+      `;
+
+      sonarMarkerRef.current = new maplibregl.Marker({
+        element: el,
+        anchor: 'center',
+        pitchAlignment: 'map',
+        rotationAlignment: 'map'
+      })
+        .setLngLat(targetLngLat)
+        .addTo(map);
+
+      sonarConeRef.current = el.querySelector('.cone-rotator-wrapper');
+    } else {
+      sonarMarkerRef.current.setLngLat(targetLngLat);
+    }
+
+    if (sonarConeRef.current && viewState?.yaw !== undefined) {
+      sonarConeRef.current.style.transform = `rotate(${viewState.yaw}deg)`;
+    }
+
+    // Force MapLibre to immediately recalculate 3D marker coordinates on terrain
+    map.triggerRepaint();
+
+    map.easeTo({
+      center: targetLngLat,
+      pitch: 60,
+      bearing: -20,
+      duration: 350,
+      essential: true
+    });
+  }, [selectedPoint, viewState?.yaw, getCoords]);
+
+  // Trigger on point change, style load, and initial 3D terrain idle
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const runSync = () => {
+      map.resize();
+      update3DSonar();
+      map.triggerRepaint();
+    };
+
+    if (map.isStyleLoaded()) {
+      runSync();
+    } else {
+      map.once('load', runSync);
+      map.once('idle', runSync);
+    }
+  }, [update3DSonar]);
+
+  return <div ref={containerRef} className="w-full h-full" />;
+};
+
 const MapComponent = ({
   isEmbed = false,
   points = [],
@@ -446,7 +759,10 @@ const MapComponent = ({
 }) => {
   const { isDark } = useTheme();
   const [mapInstance, setMapInstance] = useState(null);
+  const [is3D, setIs3D] = useState(false);
   const [currentZoom, setCurrentZoom] = useState(INITIAL_ZOOM);
+  const [mapCenter, setMapCenter] = useState(INITIAL_CENTER);
+
   const [showPanotrackData, setShowPanotrackData] = useState(true);
   const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
   const [dynamicDefectMap, setDynamicDefectMap] = useState({});
@@ -461,9 +777,6 @@ const MapComponent = ({
   const [customTileUrl, setCustomTileUrl] = useState(null);
   const [customLayerColors, setCustomLayerColors] = useState(null);
 
-  // Only show defect/in-progress colors when embedded inside the Processing Dashboard iframe
-  const isEmbeddedInDashboard = window !== window.parent;
-
   useEffect(() => {
     const handleMessage = (e) => {
       if (e.data?.type === 'SET_THEME') {
@@ -476,10 +789,10 @@ const MapComponent = ({
         const bm = e.data.basemap;
         if (bm) {
           const mapId = bm === 'esri_satellite' ? 'satellite' :
-                        bm === 'osm_standard' ? 'osm' :
-                        bm === 'carto_dark' ? 'dark' :
-                        bm === 'carto_light' ? 'positron' :
-                        bm === 'google_hybrid' ? 'google-hybrid' : bm;
+            bm === 'osm_standard' ? 'osm' :
+              bm === 'carto_dark' ? 'dark' :
+                bm === 'carto_light' ? 'positron' :
+                  bm === 'google_hybrid' ? 'google-hybrid' : bm;
           setOverrideBasemap(mapId);
         }
         if (typeof e.data.opacity === 'number') {
@@ -539,7 +852,6 @@ const MapComponent = ({
                 }
                 const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
                 const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
-                // ONLY add to stagedOverlayPoints if it is an UNPUBLISHED candidate point!
                 if (!isNaN(lat) && !isNaN(lon) && !isPanPub) {
                   extraPoints.push({
                     id: `staged-${sg}-${idx}-${p.filename || idx}`,
@@ -572,7 +884,6 @@ const MapComponent = ({
 
   const isPanotrackVisible = activeLayers.includes('panotrack');
 
-  // Dynamic radius calculation: smaller for better map clarity
   const markerRadius = useMemo(() => {
     if (currentZoom >= 18) return 6;
     if (currentZoom >= 16) return 5;
@@ -586,166 +897,224 @@ const MapComponent = ({
     return 1.0;
   }, [currentZoom]);
 
-  // Tool Clear logic
   useEffect(() => {
     if (activeTool === 'clear') {
       setActiveTool(null);
     }
   }, [activeTool, setActiveTool]);
 
-  const rightMargin = isEmbed ? '60px' : (!isViewerOpen ? '200px' : '10px');
+  // Points list with guaranteed fallback so it never renders empty
+  const effectivePointsList = useMemo(() => {
+    return (filteredPoints && filteredPoints.length > 0) ? filteredPoints : (points || []);
+  }, [filteredPoints, points]);
+
+  const compiled3DPoints = useMemo(() => {
+    return effectivePointsList.map(p => {
+      const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+      const dynamicDefect = dynamicDefectMap[fnKey];
+      const isDefect = dynamicDefect !== undefined ? Boolean(dynamicDefect) : Boolean(p.is_defect);
+      return {
+        ...p,
+        color: isDefect ? '#ef4444' : (p.status === 'in process' ? '#f59e0b' : '#22c55e')
+      };
+    });
+  }, [effectivePointsList, dynamicDefectMap]);
 
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
-      {/* BBox Guidance Banner (Simple, neat, static, no animations) */}
+      {/* Floating 2D / 3D Mode Switch */}
+      <div className="absolute top-3 right-4 z-[1000] flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 shadow-2xl backdrop-blur-md">
+        <button
+          onClick={() => setIs3D(false)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${!is3D
+            ? 'bg-slate-800 text-sky-400 border border-slate-700 shadow-sm'
+            : 'text-slate-400 hover:text-slate-200'
+            }`}
+        >
+          <Layers size={13} />
+          <span>2D Flat</span>
+        </button>
+        <button
+          onClick={() => setIs3D(true)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${is3D
+            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
+            : 'text-slate-400 hover:text-slate-200'
+            }`}
+        >
+          <Box size={13} />
+          <span>3D Terrain</span>
+        </button>
+      </div>
+
       {isBboxActive && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-md text-[11px] font-medium text-slate-200 shadow-md pointer-events-none">
           {spatialBounds ? 'Spatial BBOX Filter Active' : 'Click 1st corner, then click 2nd corner on map to set BBOX'}
         </div>
       )}
 
-      <MapContainer
-        center={INITIAL_CENTER}
-        zoom={INITIAL_ZOOM}
-        className="h-full w-full"
-        zoomControl={false}
-        preferCanvas={true}
-        whenCreated={setMapInstance}
-      >
-        <TileLayer
-          key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}`}
-          url={customTileUrl && (overrideBasemap === 'custom_tile' || overrideBasemap === 'custom') ? customTileUrl : basemap.url}
-          attribution={basemap.attribution}
-          subdomains={basemap.subdomains || ['a', 'b', 'c']}
-          maxZoom={basemap.maxZoom || 19}
-          opacity={typeof overrideOpacity === 'number' ? overrideOpacity : 1.0}
-        />
-
-        <MapController
-          filteredPoints={filteredPoints}
-          stagedOverlayPoints={stagedOverlayPoints}
-          isStagingPreviewMap={isStagingPreviewMap}
-          selectedPoint={selectedPoint}
-          activeBasemap={activeBasemap}
-          activeTool={activeTool}
-          setActiveTool={setActiveTool}
-          zoomToTrackTrigger={zoomToTrackTrigger}
-          resizeTrigger={resizeTrigger}
-          isViewerOpen={isViewerOpen}
-          viewState={viewState}
-          isEmbed={isEmbed}
-          setMapInstance={setMapInstance}
-          setCurrentZoom={setCurrentZoom}
-        />
-
-        {/* BBox Rectangle Selection Layer */}
-        <BBoxDrawLayer isActive={isBboxActive} onBoundsChange={setSpatialBounds} />
-
-        {/* Points Layer */}
-        {isPanotrackVisible && showPanotrackData && filteredPoints.map((p) => {
-          const lat = parseFloat(p.lat ?? p.latitude);
-          const lon = parseFloat(p.lon ?? p.longitude ?? p.lng);
-
-          if (spatialBounds && !isNaN(lat) && !isNaN(lon)) {
-            if (!spatialBounds.contains([lat, lon])) {
-              return null;
-            }
-          }
-
-          const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
-          const dynamicDefect = dynamicDefectMap[fnKey];
-          const rawSub = p.subgrid || (p.filename ? p.filename.split('-')[0] : '');
-          const normSub = rawSub.toUpperCase().trim();
-          const stagedInfo = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
-
-          const isDefect = (
-            dynamicDefect !== undefined
-              ? Boolean(dynamicDefect)
-              : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
-          );
-          const isStagedPoint = Boolean(
-            p.isStagingPreview ||
-            p.isStaged ||
-            (stagedInfo && !stagedInfo.isPublished) ||
-            p.status === 'in process' ||
-            p.status === 'stitching' ||
-            p.publishToWebGIS === 'in process'
-          );
-          const isStitching = !isDefect && isStagedPoint;
-          const isPublished = !isDefect && !isStagedPoint;
-
-          if (isDefect && !statusFilters.defect) return null;
-          if (isPublished && !statusFilters.published) return null;
-          if (isStitching && !statusFilters.stitching) return null;
-
-          const color = isDefect
-            ? (customLayerColors?.defectTrackColor || '#ef4444')
-            : isStitching
-              ? (customLayerColors?.stagingTrackColor || '#f59e0b')
-              : (customLayerColors?.publishedTrackColor || '#22c55e');
-
-          const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
-            ? customLayerColors.opacity
-            : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
-
-          const baseOpacity = isDefect ? 1.0 : (isStitching ? 0.7 : 1.0);
-          const pointOpacity = baseOpacity * layerOpacityMultiplier;
-
-          return (
-            <PointMarker
-              key={p.id || `pt-${lat}-${lon}`}
-              point={p}
-              radius={markerRadius}
-              weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
-              color={color}
-              opacity={pointOpacity}
-              fillOpacity={pointOpacity}
-              showPopup={isEmbed}
-              onClick={onPointSelect}
-            />
-          );
-        })}
-
-        {/* Staged Extra Overlay Points Layer (Memoized for 60 FPS Performance) */}
-        {isPanotrackVisible && showPanotrackData && statusFilters.stitching && stagedOverlayPoints.map((p, pIdx) => {
-          const lat = parseFloat(p.lat ?? p.latitude);
-          const lon = parseFloat(p.lon ?? p.longitude ?? p.lng);
-          if (isNaN(lat) || isNaN(lon)) return null;
-
-          const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
-            ? customLayerColors.opacity
-            : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
-
-          const pointOpacity = (p.opacity || 0.7) * layerOpacityMultiplier;
-
-          return (
-            <PointMarker
-              key={p.id || `staged-pt-${lat}-${lon}-${pIdx}`}
-              point={p}
-              radius={markerRadius}
-              weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
-              color={customLayerColors?.stagingTrackColor || p.color || '#f59e0b'}
-              opacity={pointOpacity}
-              fillOpacity={pointOpacity}
-              showPopup={isEmbed}
-              onClick={onPointSelect}
-            />
-          );
-        })}
-
-        {/* Selected Point Sonar */}
-        {selectedPoint && (
-          <SonarMarker
-            position={[
-              parseFloat(selectedPoint.lat ?? selectedPoint.latitude),
-              parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng)
-            ]}
-            yaw={viewState?.yaw || 0}
+      {/* 2D Leaflet View */}
+      {!is3D && (
+        <MapContainer
+          center={mapCenter}
+          zoom={currentZoom}
+          className="h-full w-full"
+          zoomControl={false}
+          preferCanvas={true}
+          whenCreated={setMapInstance}
+        >
+          <TileLayer
+            key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}`}
+            url={customTileUrl && (overrideBasemap === 'custom_tile' || overrideBasemap === 'custom') ? customTileUrl : basemap.url}
+            attribution={basemap.attribution}
+            subdomains={basemap.subdomains || ['a', 'b', 'c']}
+            maxZoom={basemap.maxZoom || 19}
+            opacity={typeof overrideOpacity === 'number' ? overrideOpacity : 1.0}
           />
-        )}
-      </MapContainer>
 
-      {/* Tool Guidance */}
+          <MapController
+            filteredPoints={effectivePointsList}
+            stagedOverlayPoints={stagedOverlayPoints}
+            isStagingPreviewMap={isStagingPreviewMap}
+            selectedPoint={selectedPoint}
+            activeBasemap={activeBasemap}
+            activeTool={activeTool}
+            setActiveTool={setActiveTool}
+            zoomToTrackTrigger={zoomToTrackTrigger}
+            resizeTrigger={resizeTrigger}
+            isViewerOpen={isViewerOpen}
+            viewState={viewState}
+            isEmbed={isEmbed}
+            setMapInstance={setMapInstance}
+            setCurrentZoom={setCurrentZoom}
+            onMapMoved={(c, z) => {
+              setMapCenter([c.lat, c.lng]);
+              setCurrentZoom(z);
+            }}
+          />
+
+          <BBoxDrawLayer isActive={isBboxActive} onBoundsChange={setSpatialBounds} />
+
+          {isPanotrackVisible && showPanotrackData && effectivePointsList.map((p) => {
+            const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
+            const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+
+            if (spatialBounds && !isNaN(lat) && !isNaN(lon)) {
+              if (!spatialBounds.contains([lat, lon])) {
+                return null;
+              }
+            }
+
+            const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+            const dynamicDefect = dynamicDefectMap[fnKey];
+            const rawSub = p.subgrid || (p.filename ? p.filename.split('-')[0] : '');
+            const normSub = rawSub.toUpperCase().trim();
+            const stagedInfo = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
+
+            const isDefect = (
+              dynamicDefect !== undefined
+                ? Boolean(dynamicDefect)
+                : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
+            );
+            const isStagedPoint = Boolean(
+              p.isStagingPreview ||
+              p.isStaged ||
+              (stagedInfo && !stagedInfo.isPublished) ||
+              p.status === 'in process' ||
+              p.status === 'stitching' ||
+              p.publishToWebGIS === 'in process'
+            );
+            const isStitching = !isDefect && isStagedPoint;
+            const isPublished = !isDefect && !isStagedPoint;
+
+            if (isDefect && !statusFilters.defect) return null;
+            if (isPublished && !statusFilters.published) return null;
+            if (isStitching && !statusFilters.stitching) return null;
+
+            const color = isDefect
+              ? (customLayerColors?.defectTrackColor || '#ef4444')
+              : isStitching
+                ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+                : (customLayerColors?.publishedTrackColor || '#22c55e');
+
+            const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
+              ? customLayerColors.opacity
+              : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
+
+            const baseOpacity = isDefect ? 1.0 : (isStitching ? 0.7 : 1.0);
+            const pointOpacity = baseOpacity * layerOpacityMultiplier;
+
+            return (
+              <PointMarker
+                key={p.id || `pt-${lat}-${lon}`}
+                point={p}
+                radius={markerRadius}
+                weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
+                color={color}
+                opacity={pointOpacity}
+                fillOpacity={pointOpacity}
+                showPopup={isEmbed}
+                onClick={onPointSelect}
+              />
+            );
+          })}
+
+          {isPanotrackVisible && showPanotrackData && statusFilters.stitching && stagedOverlayPoints.map((p, pIdx) => {
+            const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
+            const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+            if (isNaN(lat) || isNaN(lon)) return null;
+
+            const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
+              ? customLayerColors.opacity
+              : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
+
+            const pointOpacity = (p.opacity || 0.7) * layerOpacityMultiplier;
+
+            return (
+              <PointMarker
+                key={p.id || `staged-pt-${lat}-${lon}-${pIdx}`}
+                point={p}
+                radius={markerRadius}
+                weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
+                color={customLayerColors?.stagingTrackColor || p.color || '#f59e0b'}
+                opacity={pointOpacity}
+                fillOpacity={pointOpacity}
+                showPopup={isEmbed}
+                onClick={onPointSelect}
+              />
+            );
+          })}
+
+          {(() => {
+            const coords = extractCoordinates(selectedPoint);
+            if (!coords) return null;
+            return (
+              <SonarMarker
+                position={[coords.lat, coords.lon]}
+                yaw={viewState?.yaw || 0}
+              />
+            );
+          })()}
+        </MapContainer>
+      )}
+
+      {/* 3D MapLibre View */}
+      {is3D && (
+        <WebGL3DView
+          center={mapCenter}
+          zoom={currentZoom}
+          basemap={basemap}
+          overrideOpacity={overrideOpacity}
+          points={compiled3DPoints}
+          selectedPoint={selectedPoint}
+          viewState={viewState}
+          onPointSelect={onPointSelect}
+          onMapMoved={(c, z) => {
+            setMapCenter(c);
+            setCurrentZoom(z);
+          }}
+        />
+      )}
+
       {activeTool && !['download', 'clear'].includes(activeTool) && (
         <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-[3000] bg-white/95 backdrop-blur-md border border-gray-200/90 text-gray-800 text-xs px-4 py-2 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2">
           <span className="font-semibold text-gray-700">
@@ -756,14 +1125,12 @@ const MapComponent = ({
         </div>
       )}
 
-      {/* Coordinate Display */}
       {!isEmbed && <CoordinateDisplay map={mapInstance} />}
     </div>
   );
 };
 
 // --- Sub-components ---
-
 const SearchBar = ({ map, isDark }) => {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
