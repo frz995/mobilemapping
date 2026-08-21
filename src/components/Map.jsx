@@ -762,6 +762,7 @@ const MapComponent = ({
   const [is3D, setIs3D] = useState(false);
   const [currentZoom, setCurrentZoom] = useState(INITIAL_ZOOM);
   const [mapCenter, setMapCenter] = useState(INITIAL_CENTER);
+  const isDashboard = isEmbed || new URLSearchParams(window.location.search).has('dashboard') || (window.self !== window.top);
 
   const [showPanotrackData, setShowPanotrackData] = useState(true);
   const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
@@ -923,7 +924,8 @@ const MapComponent = ({
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
       {/* Floating 2D / 3D Mode Switch */}
-      <div className="absolute top-3 right-4 z-[1000] flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 shadow-2xl backdrop-blur-md">
+      <div className={`absolute top-3 ${isDashboard ? 'right-[195px]' : 'right-4'
+        } z-[1000] flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 shadow-lg backdrop-blur-md transition-all`}>
         <button
           onClick={() => setIs3D(false)}
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${!is3D
@@ -947,7 +949,7 @@ const MapComponent = ({
       </div>
 
       {isBboxActive && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-md text-[11px] font-medium text-slate-200 shadow-md pointer-events-none">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center bg-slate-900/90 backdrop-blur-md rounded-xl px-4 py-2 text-xs font-semibold text-sky-400 shadow-lg border border-slate-700/50">
           {spatialBounds ? 'Spatial BBOX Filter Active' : 'Click 1st corner, then click 2nd corner on map to set BBOX'}
         </div>
       )}
