@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Marker, Rectangle, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Marker, Rectangle } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import * as maplibregl from 'maplibre-gl';
@@ -18,7 +18,7 @@ if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
 }
 
 // --- Constants & Config ---
-const INITIAL_CENTER = [2.54866, 102.815835]; // Center of the survey points
+const INITIAL_CENTER = [2.54866, 102.815835];
 const INITIAL_ZOOM = 16;
 
 const toDMS = (deg, type) => {
@@ -445,6 +445,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
   const sonarMarkerRef = useRef(null);
   const sonarConeRef = useRef(null);
   const pointsRef = useRef(points);
+  const isIntroAnimatingRef = useRef(true);
   pointsRef.current = points;
 
   // Robust Coordinate Extractor (Handles lat/lng, latitude/longitude, y/x, arrays)
@@ -462,9 +463,11 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
   }, []);
 
   const getGeoJSON = useCallback((ptsList) => {
+    const validCoords = [];
     const features = (ptsList || []).map((p, idx) => {
       const coords = getCoords(p);
       if (!coords) return null;
+      validCoords.push([coords.lon, coords.lat]);
       return {
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [coords.lon, coords.lat] },
@@ -475,6 +478,15 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         }
       };
     }).filter(Boolean);
+
+    // Add continuous connected line trajectory
+    if (validCoords.length > 1) {
+      features.unshift({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: validCoords },
+        properties: { isTrackLine: true }
+      });
+    }
 
     return { type: 'FeatureCollection', features };
   }, [getCoords]);
@@ -493,7 +505,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
     const initialTileUrls = getFormattedTileUrls(basemap?.url);
 
-    // 1. Initialize top-down (0° pitch) at a slightly higher altitude
+    // 1. Initialize matching 2D top-down flat perspective
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: {
@@ -510,7 +522,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
             tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
             encoding: 'terrarium',
             tileSize: 256,
-            maxzoom: 15
+            maxzoom: 14
           },
           'openmaptiles': {
             type: 'vector',
@@ -523,7 +535,8 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
             type: 'raster',
             source: 'raster-tiles',
             paint: {
-              'raster-opacity': typeof overrideOpacity === 'number' ? overrideOpacity : 1.0
+              'raster-opacity': typeof overrideOpacity === 'number' ? overrideOpacity : 1.0,
+              'raster-resampling': 'linear'
             }
           },
           {
@@ -531,17 +544,17 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
             source: 'openmaptiles',
             'source-layer': 'building',
             type: 'fill-extrusion',
-            minzoom: 14,
+            minzoom: 15,
             paint: {
               'fill-extrusion-height': [
                 'interpolate', ['linear'], ['zoom'],
-                14, 0,
-                14.5, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]
+                15, 0,
+                15.5, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]
               ],
               'fill-extrusion-base': [
                 'interpolate', ['linear'], ['zoom'],
-                14, 0,
-                14.5, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]
+                15, 0,
+                15.5, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]
               ],
               'fill-extrusion-color': '#cbd5e1',
               'fill-extrusion-opacity': 0.85
@@ -550,10 +563,12 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         ]
       },
       center: [center[1], center[0]],
-      zoom: Math.max(zoom - 0.8, 12), // Start slightly zoomed out for the dive-in
-      pitch: 60,                       // Start completely flat like 2D
-      bearing: -20,                     // Start facing North
-      maxPitch: 85
+      zoom: zoom,
+      pitch: 0,
+      bearing: 0,
+      maxPitch: 75,
+      fadeDuration: 0,
+      crossSourceCollisions: false
     });
 
     mapRef.current = map;
@@ -562,24 +577,68 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       map.resize();
       map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
 
-      map.addSource('pts-3d', {
-        type: 'geojson',
-        data: getGeoJSON(pointsRef.current)
-      });
+      // GeoJSON Source
+      if (!map.getSource('pts-3d')) {
+        map.addSource('pts-3d', {
+          type: 'geojson',
+          data: getGeoJSON(pointsRef.current)
+        });
+      }
 
-      map.addLayer({
-        id: 'pts-3d-layer',
-        type: 'circle',
-        source: 'pts-3d',
-        paint: {
-          'circle-radius': 6,
-          'circle-color': ['coalesce', ['get', 'color'], '#22c55e'],
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#ffffff',
-          'circle-pitch-alignment': 'viewport',
-          'circle-pitch-scale': 'viewport'
-        }
-      });
+      // 1. Terrain Base Trajectory Shadow / Casing
+      if (!map.getLayer('pts-3d-track-casing')) {
+        map.addLayer({
+          id: 'pts-3d-track-casing',
+          type: 'line',
+          source: 'pts-3d',
+          filter: ['==', ['geometry-type'], 'LineString'],
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round'
+          },
+          paint: {
+            'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 16, 9, 19, 14],
+            'line-color': '#064e3b',
+            'line-opacity': 0.6
+          }
+        });
+      }
+
+      // 2. Main Solid Glowing 3D Trajectory Ribbon
+      if (!map.getLayer('pts-3d-track-core')) {
+        map.addLayer({
+          id: 'pts-3d-track-core',
+          type: 'line',
+          source: 'pts-3d',
+          filter: ['==', ['geometry-type'], 'LineString'],
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round'
+          },
+          paint: {
+            'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 16, 5.5, 19, 9],
+            'line-color': '#10b981',
+            'line-opacity': 0.95
+          }
+        });
+      }
+
+      // 3. Interactive Point Nodes on the Path
+      if (!map.getLayer('pts-3d-layer')) {
+        map.addLayer({
+          id: 'pts-3d-layer',
+          type: 'circle',
+          source: 'pts-3d',
+          filter: ['==', ['geometry-type'], 'Point'],
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 5.5, 19, 8],
+            'circle-color': ['coalesce', ['get', 'color'], '#22c55e'],
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': '#ffffff',
+            'circle-pitch-alignment': 'viewport'
+          }
+        });
+      }
 
       map.on('click', 'pts-3d-layer', (e) => {
         if (e.features && e.features[0]) {
@@ -596,14 +655,29 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
       update3DSonar();
 
-      // 2. Cinematic Camera Drop: swoops down into 3D pitch and target zoom
-      map.flyTo({
-        pitch: 60,
-        bearing: -20,
-        zoom: zoom,
-        duration: 1600,
-        easing: (t) => t * (2 - t), // Smooth quad ease-out dive
-        essential: true
+      // Wait for terrain elevation tiles and building meshes to cache, then trigger smooth camera ease
+      // Reset intro animation lock
+      isIntroAnimatingRef.current = true;
+
+      // Extract target coordinates from selected point or center
+      const selCoords = getCoords(selectedPoint);
+      const targetCenter = selCoords ? [selCoords.lon, selCoords.lat] : [center[1], center[0]];
+
+      map.once('idle', () => {
+        map.easeTo({
+          center: targetCenter,
+          pitch: 62,
+          bearing: -20,
+          zoom: Math.max(zoom, 16),
+          duration: 1200,
+          easing: (t) => t * (2 - t),
+          essential: true
+        });
+
+        // Release the lock after animation finishes
+        setTimeout(() => {
+          isIntroAnimatingRef.current = false;
+        }, 1300);
       });
     });
 
@@ -626,26 +700,65 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     }
   }, [points, getGeoJSON]);
 
-  // Reactive Basemap Tile Update
+  //Reactive Basemap Tile Update
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
 
-    const newTiles = getFormattedTileUrls(basemap?.url);
-    const source = map.getSource('raster-tiles');
-
-    if (source && typeof source.setTiles === 'function') {
-      source.setTiles(newTiles);
-    }
-
-    if (map.getLayer('raster-layer')) {
+    const updateBasemapSource = () => {
+      const newTiles = getFormattedTileUrls(basemap?.url);
       const opacity = typeof overrideOpacity === 'number' ? overrideOpacity : 1.0;
-      map.setPaintProperty('raster-layer', 'raster-opacity', opacity);
+
+      // If source exists, safely swap tiles or recreate if schema differs
+      const source = map.getSource('raster-tiles');
+      if (source && typeof source.setTiles === 'function') {
+        source.setTiles(newTiles);
+      } else {
+        // Fallback: Re-mount raster layer cleanly below 3D buildings
+        if (map.getLayer('raster-layer')) map.removeLayer('raster-layer');
+        if (map.getSource('raster-tiles')) map.removeSource('raster-tiles');
+
+        map.addSource('raster-tiles', {
+          type: 'raster',
+          tiles: newTiles,
+          tileSize: 256,
+          attribution: basemap?.attribution || ''
+        });
+
+        // Insert at the bottom beneath 3D buildings and trajectory lines
+        const beforeLayerId = map.getLayer('3d-buildings') ? '3d-buildings' : undefined;
+        map.addLayer(
+          {
+            id: 'raster-layer',
+            type: 'raster',
+            source: 'raster-tiles',
+            paint: {
+              'raster-opacity': opacity,
+              'raster-resampling': 'linear'
+            }
+          },
+          beforeLayerId
+        );
+      }
+
+      if (map.getLayer('raster-layer')) {
+        map.setPaintProperty('raster-layer', 'raster-opacity', opacity);
+      }
+
+      map.triggerRepaint();
+    };
+
+    if (map.isStyleLoaded()) {
+      updateBasemapSource();
+    } else {
+      map.once('load', updateBasemapSource);
+      map.once('idle', updateBasemapSource);
     }
   }, [basemap, overrideOpacity, getFormattedTileUrls]);
 
   // Synchronize 3D Sonar directly to Selected Point Coordinates
-  // Synchronize 3D Sonar directly to Selected Point Coordinates
+  const lastCenterCoordRef = useRef('');
+
   const update3DSonar = useCallback(() => {
     const map = mapRef.current;
     if (!map || !selectedPoint) {
@@ -660,18 +773,20 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     if (!coords) return;
 
     const targetLngLat = [coords.lon, coords.lat];
+    const coordKey = `${coords.lat.toFixed(5)}_${coords.lon.toFixed(5)}`;
 
     if (!sonarMarkerRef.current) {
       const el = document.createElement('div');
       el.className = 'panotrack-sonar-container';
-      el.style.width = '52px';
-      el.style.height = '52px';
+      el.style.width = '48px';
+      el.style.height = '48px';
       el.style.display = 'flex';
       el.style.alignItems = 'center';
       el.style.justifyContent = 'center';
+      el.style.willChange = 'transform';
       el.innerHTML = `
-        <div class="cone-rotator-wrapper" style="position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none;">
-          <svg viewBox="0 0 100 100" width="52" height="52" style="overflow: visible;">
+        <div class="cone-rotator-wrapper" style="position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; will-change: transform;">
+          <svg viewBox="0 0 100 100" width="48" height="48" style="overflow: visible;">
             <defs>
               <linearGradient id="gradSonar3D" x1="0%" y1="100%" x2="0%" y2="0%">
                 <stop offset="0%" style="stop-color:#00f2ff;stop-opacity:0" />
@@ -681,7 +796,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
             <path d="M 50 50 L 15 10 A 50 50 0 0 1 85 10 Z" fill="url(#gradSonar3D)" stroke="none" />
           </svg>
         </div>
-        <div class="panotrack-sonar-core" style="width: 10px; height: 10px; border-radius: 50%; background: #00f2ff; box-shadow: 0 0 8px #00f2ff; z-index: 10;"></div>
+        <div class="panotrack-sonar-core" style="width: 8px; height: 8px; border-radius: 50%; background: #00f2ff; box-shadow: 0 0 6px #00f2ff; z-index: 10;"></div>
       `;
 
       sonarMarkerRef.current = new maplibregl.Marker({
@@ -702,19 +817,19 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       sonarConeRef.current.style.transform = `rotate(${viewState.yaw}deg)`;
     }
 
-    // Force MapLibre to immediately recalculate 3D marker coordinates on terrain
-    map.triggerRepaint();
-
-    map.easeTo({
-      center: targetLngLat,
-      pitch: 60,
-      bearing: -20,
-      duration: 350,
-      essential: true
-    });
+    // Only pan camera if the initial dive has finished and point changed
+    if (!isIntroAnimatingRef.current && lastCenterCoordRef.current !== coordKey) {
+      lastCenterCoordRef.current = coordKey;
+      map.easeTo({
+        center: targetLngLat,
+        pitch: 60,
+        bearing: -20,
+        duration: 350,
+        essential: false
+      });
+    }
   }, [selectedPoint, viewState?.yaw, getCoords]);
 
-  // Trigger on point change, style load, and initial 3D terrain idle
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -904,7 +1019,6 @@ const MapComponent = ({
     }
   }, [activeTool, setActiveTool]);
 
-  // Points list with guaranteed fallback so it never renders empty
   const effectivePointsList = useMemo(() => {
     return (filteredPoints && filteredPoints.length > 0) ? filteredPoints : (points || []);
   }, [filteredPoints, points]);
@@ -924,11 +1038,11 @@ const MapComponent = ({
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
       {/* Floating 2D / 3D Mode Switch */}
-      <div className={`absolute top-3 ${isDashboard ? 'right-[195px]' : 'right-4'
-        } z-[1000] flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 shadow-lg backdrop-blur-md transition-all`}>
+      <div className={`absolute top-4 ${isDashboard ? 'right-[108px]' : 'right-4'
+        } z-[1000] flex items-center h-10 bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 shadow-lg backdrop-blur-md transition-all`}>
         <button
           onClick={() => setIs3D(false)}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${!is3D
+          className={`flex items-center gap-1.5 px-3 h-full rounded-lg text-xs font-semibold transition-all cursor-pointer ${!is3D
             ? 'bg-slate-800 text-sky-400 border border-slate-700 shadow-sm'
             : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -938,7 +1052,7 @@ const MapComponent = ({
         </button>
         <button
           onClick={() => setIs3D(true)}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${is3D
+          className={`flex items-center gap-1.5 px-3 h-full rounded-lg text-xs font-semibold transition-all cursor-pointer ${is3D
             ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
             : 'text-slate-400 hover:text-slate-200'
             }`}
