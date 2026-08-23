@@ -463,11 +463,9 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
   }, []);
 
   const getGeoJSON = useCallback((ptsList) => {
-    const validCoords = [];
     const features = (ptsList || []).map((p, idx) => {
       const coords = getCoords(p);
       if (!coords) return null;
-      validCoords.push([coords.lon, coords.lat]);
       return {
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [coords.lon, coords.lat] },
@@ -478,15 +476,6 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         }
       };
     }).filter(Boolean);
-
-    // Add continuous connected line trajectory
-    if (validCoords.length > 1) {
-      features.unshift({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: validCoords },
-        properties: { isTrackLine: true }
-      });
-    }
 
     return { type: 'FeatureCollection', features };
   }, [getCoords]);
@@ -585,43 +574,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         });
       }
 
-      // 1. Terrain Base Trajectory Shadow / Casing
-      if (!map.getLayer('pts-3d-track-casing')) {
-        map.addLayer({
-          id: 'pts-3d-track-casing',
-          type: 'line',
-          source: 'pts-3d',
-          filter: ['==', ['geometry-type'], 'LineString'],
-          layout: {
-            'line-cap': 'round',
-            'line-join': 'round'
-          },
-          paint: {
-            'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 16, 9, 19, 14],
-            'line-color': '#064e3b',
-            'line-opacity': 0.6
-          }
-        });
-      }
 
-      // 2. Main Solid Glowing 3D Trajectory Ribbon
-      if (!map.getLayer('pts-3d-track-core')) {
-        map.addLayer({
-          id: 'pts-3d-track-core',
-          type: 'line',
-          source: 'pts-3d',
-          filter: ['==', ['geometry-type'], 'LineString'],
-          layout: {
-            'line-cap': 'round',
-            'line-join': 'round'
-          },
-          paint: {
-            'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 16, 5.5, 19, 9],
-            'line-color': '#10b981',
-            'line-opacity': 0.95
-          }
-        });
-      }
 
       // 3. Interactive Point Nodes on the Path
       if (!map.getLayer('pts-3d-layer')) {
@@ -881,7 +834,23 @@ const MapComponent = ({
 
   const [showPanotrackData, setShowPanotrackData] = useState(true);
   const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
-  const [dynamicDefectMap, setDynamicDefectMap] = useState({});
+  const [dynamicDefectMap, setDynamicDefectMap] = useState(() => {
+    try {
+      const initMap = {};
+      const cached = JSON.parse(localStorage.getItem('app_qaqc_audit_cache_v2') || '{}');
+      Object.values(cached).forEach((rec) => {
+        if (rec && Array.isArray(rec.defectsList)) {
+          rec.defectsList.forEach(d => {
+            const fn = (d.point_id || d.filename || d.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
+            if (fn) initMap[fn] = true;
+          });
+        }
+      });
+      return initMap;
+    } catch (_) {
+      return {};
+    }
+  });
   const [isBboxActive, setIsBboxActive] = useState(false);
   const [spatialBounds, setSpatialBounds] = useState(null);
 
@@ -924,13 +893,23 @@ const MapComponent = ({
       } else if (e.data?.type === 'FILTER_STATUS_TYPES') {
         if (e.data.statusFilters) setStatusFilters(e.data.statusFilters);
         if (typeof e.data.showPanotrackData === 'boolean') setShowPanotrackData(e.data.showPanotrackData);
-      } else if (e.data?.type === 'UPDATE_POINT_DEFECT') {
-        const fn = (e.data.filename || '').replace(/^.*[\\\/]/, '').toUpperCase();
+      } else if (e.data?.type === 'UPDATE_POINT_DEFECT' || e.data?.type === 'MAP_POINT_DEFECT') {
+        const fn = (e.data.filename || e.data.pointId || e.data.point_id || '').replace(/^.*[\\\/]/, '').toUpperCase();
+        const isDefect = e.data.is_defect !== undefined ? Boolean(e.data.is_defect) : true;
         if (fn) {
           setDynamicDefectMap(prev => ({
             ...prev,
-            [fn]: Boolean(e.data.is_defect)
+            [fn]: isDefect
           }));
+        }
+      } else if (e.data?.type === 'QAQC_DEFECTS_SYNC' || e.data?.type === 'SET_DEFECTS_LIST') {
+        if (Array.isArray(e.data.defects)) {
+          const newMap = {};
+          e.data.defects.forEach(d => {
+            const key = (d.filename || d.point_id || d.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
+            if (key) newMap[key] = true;
+          });
+          setDynamicDefectMap(prev => ({ ...prev, ...newMap }));
         }
       } else if (e.data?.type === 'TOGGLE_BBOX_DRAW') {
         setIsBboxActive(Boolean(e.data.isDrawing));
@@ -959,12 +938,25 @@ const MapComponent = ({
               pans.forEach((p, idx) => {
                 const fn = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
                 const isPanPub = Boolean(isItemPub || p.isPublished || p.publishToWebGIS === 'yes' || p.publishToUSVPRO === 'yes' || p.isSyncedWithSupabase || p.status === 'yes');
+                const isPanDefect = Boolean(
+                  p.isDefect ||
+                  p.is_defect ||
+                  p.status === 'defect' ||
+                  p.qa_status === 'defect' ||
+                  p.color === '#ef4444' ||
+                  p.color === '#EF4444' ||
+                  (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
+                );
+
                 if (fn) {
                   sMap[fn] = {
-                    status: isPanPub ? 'yes' : 'in process',
+                    status: isPanDefect ? 'defect' : isPanPub ? 'yes' : 'in process',
                     isPublished: isPanPub,
-                    color: isPanPub ? '#22c55e' : '#f59e0b'
+                    color: isPanDefect ? '#ef4444' : isPanPub ? '#22c55e' : '#f59e0b'
                   };
+                  if (isPanDefect) {
+                    setDynamicDefectMap(prev => ({ ...prev, [fn]: true }));
+                  }
                 }
                 const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
                 const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
@@ -975,10 +967,12 @@ const MapComponent = ({
                     filename: p.filename || p.image_url || `${sg}-${idx}`,
                     lat,
                     lon,
-                    status: 'in process',
+                    status: isPanDefect ? 'defect' : 'in process',
                     isStaged: true,
-                    opacity: 0.7,
-                    color: '#f59e0b'
+                    isDefect: isPanDefect,
+                    is_defect: isPanDefect,
+                    opacity: isPanDefect ? 1.0 : 0.7,
+                    color: isPanDefect ? '#ef4444' : '#f59e0b'
                   });
                 }
               });
@@ -1174,16 +1168,31 @@ const MapComponent = ({
             );
           })}
 
-          {isPanotrackVisible && showPanotrackData && statusFilters.stitching && stagedOverlayPoints.map((p, pIdx) => {
+          {isPanotrackVisible && showPanotrackData && stagedOverlayPoints.map((p, pIdx) => {
             const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
             const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
             if (isNaN(lat) || isNaN(lon)) return null;
+
+            const fnKey = (p.filename || p.image_url || p.id || '').replace(/^.*[\\\/]/, '').toUpperCase();
+            const dynamicDefect = dynamicDefectMap[fnKey];
+            const isDefect = dynamicDefect !== undefined
+              ? Boolean(dynamicDefect)
+              : Boolean(p.isDefect || p.is_defect || p.color === '#ef4444' || p.color === '#EF4444');
+            const isStitching = !isDefect;
+
+            if (isDefect && !statusFilters.defect) return null;
+            if (isStitching && !statusFilters.stitching) return null;
 
             const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
               ? customLayerColors.opacity
               : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
 
-            const pointOpacity = (p.opacity || 0.7) * layerOpacityMultiplier;
+            const baseOpacity = isDefect ? 1.0 : (p.opacity || 0.7);
+            const pointOpacity = baseOpacity * layerOpacityMultiplier;
+
+            const pointColor = isDefect
+              ? (customLayerColors?.defectTrackColor || '#ef4444')
+              : (customLayerColors?.stagingTrackColor || p.color || '#f59e0b');
 
             return (
               <PointMarker
@@ -1191,7 +1200,7 @@ const MapComponent = ({
                 point={p}
                 radius={markerRadius}
                 weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
-                color={customLayerColors?.stagingTrackColor || p.color || '#f59e0b'}
+                color={pointColor}
                 opacity={pointOpacity}
                 fillOpacity={pointOpacity}
                 showPopup={isEmbed}
