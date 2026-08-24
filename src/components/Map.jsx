@@ -859,7 +859,13 @@ const MapComponent = ({
   const [overrideOpacity, setOverrideOpacity] = useState(1.0);
   const [customTileUrl, setCustomTileUrl] = useState(null);
   const [customLayerColors, setCustomLayerColors] = useState(null);
-  const [isSingleDailyRun, setIsSingleDailyRun] = useState(false);
+  const [isSingleDailyRun, setIsSingleDailyRun] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('isSingleRun') === 'true' || Boolean(params.get('runId'));
+    }
+    return false;
+  });
 
   useEffect(() => {
     const handleMessage = (e) => {
@@ -1024,15 +1030,18 @@ const MapComponent = ({
 
   const effectivePointsList = useMemo(() => {
     // If viewing an individual daily survey run, strictly display only the points of that specific run
-    if (isSingleDailyRun && stagedOverlayPoints && stagedOverlayPoints.length > 0) {
-      return [...stagedOverlayPoints].sort((a, b) => {
-        const fnA = (a.filename || a.image_url || '');
-        const fnB = (b.filename || b.image_url || '');
-        const mA = fnA.match(/-(\d+)\./);
-        const mB = fnB.match(/-(\d+)\./);
-        if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
-        return (a.id || 0) - (b.id || 0);
-      });
+    if (isSingleDailyRun) {
+      if (stagedOverlayPoints && stagedOverlayPoints.length > 0) {
+        return [...stagedOverlayPoints].sort((a, b) => {
+          const fnA = (a.filename || a.image_url || '');
+          const fnB = (b.filename || b.image_url || '');
+          const mA = fnA.match(/-(\d+)\./);
+          const mB = fnB.match(/-(\d+)\./);
+          if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
+          return (a.id || 0) - (b.id || 0);
+        });
+      }
+      return [];
     }
 
     const baseList = (filteredPoints && filteredPoints.length > 0) ? filteredPoints : (points || []);
