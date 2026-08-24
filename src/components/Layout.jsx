@@ -172,17 +172,19 @@ const Layout = ({ isEmbed = false }) => {
     let subgridMatched = points;
     if (activeSubgrid && activeSubgrid.trim() !== '') {
       const searchTerms = activeSubgrid.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
-      subgridMatched = points.filter(point => {
-        const pointSubgrid = (
-          point.subgrid ||
-          (point.filename ? point.filename.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
-          (point.image_url ? point.image_url.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
-          (point.description ? point.description.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
-          ''
-        ).toLowerCase();
-        return searchTerms.some(term => pointSubgrid.includes(term));
-      });
-      if (subgridMatched.length === 0) subgridMatched = points;
+      // Strict matching for subgrid terms
+      if (searchTerms.length > 0) {
+        subgridMatched = points.filter(point => {
+          const pointSubgrid = (
+            point.subgrid ||
+            (point.filename ? point.filename.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
+            (point.image_url ? point.image_url.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
+            (point.description ? point.description.match(/N\d{2,3}E\d{2,3}/i)?.[0] : '') ||
+            ''
+          ).toLowerCase();
+          return searchTerms.some(term => pointSubgrid === term || pointSubgrid.includes(term));
+        });
+      }
     }
 
     // 2. Date Filter (graceful fallback if date query returns 0 points)

@@ -192,9 +192,7 @@ const MapController = ({
 
   useEffect(() => {
     if (isStagingPreviewMap) return;
-    if (window.hasMainMapFitted) return;
     if (!selectedPoint && filteredPoints && filteredPoints.length > 0) {
-      window.hasMainMapFitted = true;
       const latlngs = filteredPoints
         .map(p => {
           const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
@@ -861,6 +859,7 @@ const MapComponent = ({
   const [overrideOpacity, setOverrideOpacity] = useState(1.0);
   const [customTileUrl, setCustomTileUrl] = useState(null);
   const [customLayerColors, setCustomLayerColors] = useState(null);
+  const [isSingleDailyRun, setIsSingleDailyRun] = useState(false);
 
   useEffect(() => {
     const handleMessage = (e) => {
@@ -893,6 +892,12 @@ const MapComponent = ({
       } else if (e.data?.type === 'FILTER_STATUS_TYPES') {
         if (e.data.statusFilters) setStatusFilters(e.data.statusFilters);
         if (typeof e.data.showPanotrackData === 'boolean') setShowPanotrackData(e.data.showPanotrackData);
+      } else if (e.data?.type === 'FILTER_SUBGRID' || e.data?.type === 'SET_SUBGRID_FILTER') {
+        if (e.data.isSingleRun !== undefined) {
+          setIsSingleDailyRun(Boolean(e.data.isSingleRun));
+        } else if (!e.data.runId) {
+          setIsSingleDailyRun(false);
+        }
       } else if (e.data?.type === 'UPDATE_POINT_DEFECT' || e.data?.type === 'MAP_POINT_DEFECT') {
         const fn = (e.data.filename || e.data.pointId || e.data.point_id || '').replace(/^.*[\\\/]/, '').toUpperCase();
         const isDefect = e.data.is_defect !== undefined ? Boolean(e.data.is_defect) : true;
@@ -917,6 +922,7 @@ const MapComponent = ({
       } else if (e.data?.type === 'SET_STAGED_DATA' || e.data?.type === 'STAGED_DATA_PREVIEW') {
         const isPreview = Boolean(e.data.isStagingPreview === true);
         setIsStagingPreviewMap(isPreview);
+        setIsSingleDailyRun(Boolean(e.data?.isSingleRun));
         if (e.data.stagedItems && Array.isArray(e.data.stagedItems)) {
           const sMap = {};
           const extraPoints = [];
@@ -960,19 +966,22 @@ const MapComponent = ({
                 }
                 const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
                 const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
-                if (!isNaN(lat) && !isNaN(lon) && !isPanPub) {
+                if (!isNaN(lat) && !isNaN(lon)) {
                   extraPoints.push({
-                    id: `staged-${sg}-${idx}-${p.filename || idx}`,
+                    id: p.id || `staged-${sg}-${idx}-${fn || idx}`,
                     subgrid: sg,
                     filename: p.filename || p.image_url || `${sg}-${idx}`,
+                    image_url: p.image_url || p.filename,
                     lat,
                     lon,
-                    status: isPanDefect ? 'defect' : 'in process',
-                    isStaged: true,
+                    status: isPanDefect ? 'defect' : (isPanPub ? 'yes' : 'in process'),
+                    isStaged: !isPanPub,
+                    isPublished: isPanPub,
+                    published: isPanPub,
                     isDefect: isPanDefect,
                     is_defect: isPanDefect,
-                    opacity: isPanDefect ? 1.0 : 0.7,
-                    color: isPanDefect ? '#ef4444' : '#f59e0b'
+                    opacity: isPanDefect ? 1.0 : (isPanPub ? 1.0 : 0.7),
+                    color: isPanDefect ? '#ef4444' : (isPanPub ? '#22c55e' : '#f59e0b')
                   });
                 }
               });
@@ -1014,8 +1023,52 @@ const MapComponent = ({
   }, [activeTool, setActiveTool]);
 
   const effectivePointsList = useMemo(() => {
-    return (filteredPoints && filteredPoints.length > 0) ? filteredPoints : (points || []);
-  }, [filteredPoints, points]);
+    // If viewing an individual daily survey run, strictly display only the points of that specific run
+    if (isSingleDailyRun && stagedOverlayPoints && stagedOverlayPoints.length > 0) {
+      return [...stagedOverlayPoints].sort((a, b) => {
+        const fnA = (a.filename || a.image_url || '');
+        const fnB = (b.filename || b.image_url || '');
+        const mA = fnA.match(/-(\d+)\./);
+        const mB = fnB.match(/-(\d+)\./);
+        if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
+        return (a.id || 0) - (b.id || 0);
+      });
+    }
+
+    const baseList = (filteredPoints && filteredPoints.length > 0) ? filteredPoints : (points || []);
+    let combined = baseList;
+    if (stagedOverlayPoints && stagedOverlayPoints.length > 0) {
+      const activeSub = (filterSubgrid || '').toUpperCase().trim();
+      const relevantStaged = activeSub
+        ? stagedOverlayPoints.filter(sp => {
+            const spSub = (sp.subgrid || '').toUpperCase().trim();
+            return spSub.includes(activeSub) || activeSub.includes(spSub);
+          })
+        : stagedOverlayPoints;
+
+      const existingFilenames = new Set(
+        baseList
+          .map(p => (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase())
+          .filter(Boolean)
+      );
+
+      const extra = relevantStaged.filter(sp => {
+        const spKey = (sp.filename || sp.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+        return spKey ? !existingFilenames.has(spKey) : true;
+      });
+
+      combined = [...baseList, ...extra];
+    }
+
+    return [...combined].sort((a, b) => {
+      const fnA = (a.filename || a.image_url || '');
+      const fnB = (b.filename || b.image_url || '');
+      const mA = fnA.match(/-(\d+)\./);
+      const mB = fnB.match(/-(\d+)\./);
+      if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
+      return (a.id || 0) - (b.id || 0);
+    });
+  }, [filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun]);
 
   const compiled3DPoints = useMemo(() => {
     return effectivePointsList.map(p => {
