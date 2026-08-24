@@ -174,12 +174,12 @@ const MapController = ({
   }, [map, setMapInstance, setCurrentZoom, onMapMoved]);
 
   useEffect(() => {
-    if (isStagingPreviewMap && stagedOverlayPoints && stagedOverlayPoints.length > 0 && !selectedPoint) {
+    if (isStagingPreviewMap && stagedOverlayPoints && stagedOverlayPoints.length > 0) {
       const latlngs = stagedOverlayPoints
         .map(p => {
           const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
           const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
-          return isNaN(ln) || isNaN(lt) ? null : [lt, ln];
+          return isNaN(ln) || isNaN(lt) || (ln === 0 && lt === 0) ? null : [lt, ln];
         })
         .filter(Boolean);
 
@@ -197,7 +197,7 @@ const MapController = ({
         .map(p => {
           const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
           const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
-          return isNaN(ln) || isNaN(lt) ? null : [lt, ln];
+          return isNaN(ln) || isNaN(lt) || (ln === 0 && lt === 0) ? null : [lt, ln];
         })
         .filter(Boolean);
 
