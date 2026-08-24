@@ -1221,47 +1221,6 @@ const MapComponent = ({
             );
           })}
 
-          {isPanotrackVisible && showPanotrackData && stagedOverlayPoints.map((p, pIdx) => {
-            const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
-            const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
-            if (isNaN(lat) || isNaN(lon)) return null;
-
-            const fnKey = (p.filename || p.image_url || p.id || '').replace(/^.*[\\\/]/, '').toUpperCase();
-            const dynamicDefect = dynamicDefectMap[fnKey];
-            const isDefect = dynamicDefect !== undefined
-              ? Boolean(dynamicDefect)
-              : Boolean(p.isDefect || p.is_defect || p.color === '#ef4444' || p.color === '#EF4444');
-            const isStitching = !isDefect;
-
-            if (isDefect && !statusFilters.defect) return null;
-            if (isStitching && !statusFilters.stitching) return null;
-
-            const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
-              ? customLayerColors.opacity
-              : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
-
-            const baseOpacity = isDefect ? 1.0 : (p.opacity || 0.7);
-            const pointOpacity = baseOpacity * layerOpacityMultiplier;
-
-            const pointColor = isDefect
-              ? (customLayerColors?.defectTrackColor || '#ef4444')
-              : (customLayerColors?.stagingTrackColor || p.color || '#f59e0b');
-
-            return (
-              <PointMarker
-                key={p.id || `staged-pt-${lat}-${lon}-${pIdx}`}
-                point={p}
-                radius={markerRadius}
-                weight={customLayerColors?.lineWidth ? Math.max(1, customLayerColors.lineWidth * 0.5) : markerWeight}
-                color={pointColor}
-                opacity={pointOpacity}
-                fillOpacity={pointOpacity}
-                showPopup={isEmbed}
-                onClick={onPointSelect}
-              />
-            );
-          })}
-
           {(() => {
             const coords = extractCoordinates(selectedPoint);
             if (!coords) return null;
