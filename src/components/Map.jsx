@@ -880,6 +880,13 @@ const MapComponent = ({
   const [overrideOpacity, setOverrideOpacity] = useState(1.0);
   const [customTileUrl, setCustomTileUrl] = useState(null);
   const [customLayerColors, setCustomLayerColors] = useState(null);
+  const [activeRunId, setActiveRunId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('runId') || null;
+    }
+    return null;
+  });
   const [isSingleDailyRun, setIsSingleDailyRun] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -927,6 +934,9 @@ const MapComponent = ({
         } else if (e.data.isSingleRun === false || (!e.data.subgrid && !e.data.runId)) {
           setIsSingleDailyRun(false);
         }
+        if (e.data.runId !== undefined) {
+          setActiveRunId(e.data.runId || null);
+        }
       } else if (e.data?.type === 'UPDATE_POINT_DEFECT' || e.data?.type === 'MAP_POINT_DEFECT') {
         const fn = (e.data.filename || e.data.pointId || e.data.point_id || '').replace(/^.*[\\\/]/, '').toUpperCase();
         const isDefect = e.data.is_defect !== undefined ? Boolean(e.data.is_defect) : true;
@@ -953,6 +963,9 @@ const MapComponent = ({
         setIsStagingPreviewMap(isPreview);
         const isSingle = e.data.isSingleRun !== undefined ? Boolean(e.data.isSingleRun) : Boolean(e.data.runId);
         setIsSingleDailyRun(isSingle);
+        if (e.data.runId !== undefined) {
+          setActiveRunId(e.data.runId || null);
+        }
 
         if (e.data.stagedItems && Array.isArray(e.data.stagedItems)) {
           const sMap = {};
@@ -1065,13 +1078,13 @@ const MapComponent = ({
   }, [activeTool, setActiveTool]);
 
   const effectivePointsList = useMemo(() => {
-    const isSingle = Boolean(isSingleDailyRun || isSingleRun || runId);
+    const isSingle = Boolean(isSingleDailyRun || isSingleRun || runId || activeRunId);
 
     // If viewing an individual daily survey run, strictly display only the points of that specific run
     if (isSingle) {
       if (stagedOverlayPoints && stagedOverlayPoints.length > 0) {
         let pts = stagedOverlayPoints;
-        const targetRunId = runId || null;
+        const targetRunId = activeRunId || runId || null;
         if (targetRunId) {
           const matchingPts = pts.filter(p => p.runId === targetRunId || (p.id && String(p.id).includes(targetRunId)));
           if (matchingPts.length > 0) pts = matchingPts;
@@ -1132,7 +1145,7 @@ const MapComponent = ({
       if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
       return (a.id || 0) - (b.id || 0);
     });
-  }, [filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun, isSingleRun, runId]);
+  }, [filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun, isSingleRun, runId, activeRunId]);
 
   const compiled3DPoints = useMemo(() => {
     return effectivePointsList.map(p => {
