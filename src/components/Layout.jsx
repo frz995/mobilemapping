@@ -208,24 +208,47 @@ const Layout = ({ isEmbed = false }) => {
     // 2. Date Filter
     if (activeDate && activeDate.trim() !== '' && subgridMatched.length > 0) {
       const dateQuery = activeDate.trim().toLowerCase();
+      const qYear = dateQuery.match(/\b\d{4}\b/)?.[0] || '';
+      const qDayMatch = dateQuery.match(/\b(0?[1-9]|[12]\d|3[01])\b/)?.[0] || '';
+      const qDay = qDayMatch ? parseInt(qDayMatch, 10) : null;
+      const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      const qMonthIdx = months.findIndex(m => dateQuery.includes(m));
+
       subgridMatched = subgridMatched.filter(point => {
         const rawDate = String(point.captured_at || point.date || point.created_at || '');
         if (!rawDate) return false;
+
+        // 1. Direct string match
+        if (rawDate.toLowerCase().includes(dateQuery)) return true;
+
+        // 2. UTC Date matching (e.g. "2022-04-06T16:00:00")
+        const isoMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) {
+          const [, yr, mo, dy] = isoMatch;
+          const yrNum = parseInt(yr, 10);
+          const moNum = parseInt(mo, 10) - 1; // 0-indexed
+          const dyNum = parseInt(dy, 10);
+
+          if (qYear && yrNum !== parseInt(qYear, 10)) return false;
+          if (qMonthIdx !== -1 && moNum !== qMonthIdx) return false;
+          if (qDay !== null && Math.abs(dyNum - qDay) > 1 && dyNum !== qDay) return false;
+          return true;
+        }
+
+        // 3. Date object fallback
         const pDate = new Date(rawDate);
         if (!isNaN(pDate.getTime())) {
-          const monthShort = pDate.toLocaleDateString('en-US', { month: 'short' }).toLowerCase();
-          const monthLong = pDate.toLocaleDateString('en-US', { month: 'long' }).toLowerCase();
-          const dayNum = String(pDate.getDate());
-          const isoDate = pDate.toISOString().slice(0, 10);
-          return (
-            dateQuery.includes(isoDate) ||
-            isoDate.includes(dateQuery) ||
-            (dateQuery.includes(monthShort) && dateQuery.includes(dayNum)) ||
-            (dateQuery.includes(monthLong) && dateQuery.includes(dayNum)) ||
-            rawDate.toLowerCase().includes(dateQuery)
-          );
+          const utcYr = pDate.getUTCFullYear();
+          const utcMo = pDate.getUTCMonth();
+          const utcDy = pDate.getUTCDate();
+          const locDy = pDate.getDate();
+
+          if (qYear && utcYr !== parseInt(qYear, 10)) return false;
+          if (qMonthIdx !== -1 && utcMo !== qMonthIdx && pDate.getMonth() !== qMonthIdx) return false;
+          if (qDay !== null && (utcDy === qDay || locDy === qDay || Math.abs(utcDy - qDay) <= 1)) return true;
         }
-        return rawDate.toLowerCase().includes(dateQuery);
+
+        return false;
       });
     }
 

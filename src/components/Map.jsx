@@ -1068,6 +1068,16 @@ const MapComponent = ({
           return (a.id || 0) - (b.id || 0);
         });
       }
+      if (filteredPoints && filteredPoints.length > 0) {
+        return [...filteredPoints].sort((a, b) => {
+          const fnA = (a.filename || a.image_url || '');
+          const fnB = (b.filename || b.image_url || '');
+          const mA = fnA.match(/-(\d+)\./);
+          const mB = fnB.match(/-(\d+)\./);
+          if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
+          return (a.id || 0) - (b.id || 0);
+        });
+      }
       return [];
     }
 
