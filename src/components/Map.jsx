@@ -174,6 +174,8 @@ const MapController = ({
   }, [map, setMapInstance, setCurrentZoom, onMapMoved]);
 
 
+  const lastBoundsKeyRef = useRef('');
+
   useEffect(() => {
     if (filteredPoints && filteredPoints.length > 0) {
       const latlngs = filteredPoints
@@ -185,21 +187,55 @@ const MapController = ({
         .filter(Boolean);
 
       if (latlngs.length > 0) {
-        const bounds = L.latLngBounds(latlngs);
-        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+        const firstPt = latlngs[0];
+        const lastPt = latlngs[latlngs.length - 1];
+        const boundsKey = `${latlngs.length}_${firstPt[0].toFixed(4)}_${firstPt[1].toFixed(4)}_${lastPt[0].toFixed(4)}_${lastPt[1].toFixed(4)}`;
+
+        if (boundsKey !== lastBoundsKeyRef.current) {
+          lastBoundsKeyRef.current = boundsKey;
+          const bounds = L.latLngBounds(latlngs);
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+          }
+        }
       }
     }
-  }, [filteredPoints, map, zoomToTrackTrigger]);
+  }, [filteredPoints, map]);
 
+  // Explicit user trigger for "Zoom to Track"
   useEffect(() => {
-    if (selectedPoint) {
+    if (zoomToTrackTrigger > 0 && filteredPoints && filteredPoints.length > 0) {
+      const latlngs = filteredPoints
+        .map(p => {
+          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+          const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
+          return isNaN(ln) || isNaN(lt) || (ln === 0 && lt === 0) ? null : [lt, ln];
+        })
+        .filter(Boolean);
+
+      if (latlngs.length > 0) {
+        const bounds = L.latLngBounds(latlngs);
+        if (bounds.isValid()) {
+          map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+        }
+      }
+    }
+  }, [zoomToTrackTrigger]);
+
+  const lastSelectedCoordsRef = useRef('');
+  useEffect(() => {
+    if (selectedPoint && map) {
       const lat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude ?? selectedPoint.y);
       const lon = parseFloat(selectedPoint.lon ?? selectedPoint.longitude ?? selectedPoint.lng ?? selectedPoint.x);
       if (!isNaN(lat) && !isNaN(lon)) {
-        map.panTo([lat, lon], { animate: true, duration: 0.4 });
+        const coordsKey = `${lat.toFixed(5)}_${lon.toFixed(5)}`;
+        if (coordsKey !== lastSelectedCoordsRef.current) {
+          lastSelectedCoordsRef.current = coordsKey;
+          map.panTo([lat, lon], { animate: true, duration: 0.3 });
+        }
       }
     }
-  }, [selectedPoint, zoomToTrackTrigger, map]);
+  }, [selectedPoint, map]);
 
   useEffect(() => {
     const handleFlyTo = (e) => {
