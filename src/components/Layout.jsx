@@ -90,6 +90,20 @@ const Layout = ({ isEmbed = false }) => {
   const [filterDate, setFilterDate] = useState(''); // ISO Date string YYYY-MM-DD
   const [filterColorByDate, setFilterColorByDate] = useState(false);
   const [filterDateStrict, setFilterDateStrict] = useState(false);
+  const [isSingleRun, setIsSingleRun] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('isSingleRun') === 'true' || Boolean(params.get('runId'));
+    }
+    return false;
+  });
+  const [runId, setRunId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('runId') || null;
+    }
+    return null;
+  });
   const [zoomToTrackTrigger, setZoomToTrackTrigger] = useState(0);
 
   // --- Playback State ---
@@ -112,9 +126,13 @@ const Layout = ({ isEmbed = false }) => {
       if (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID') {
         const sub = event.data.subgrid !== undefined ? event.data.subgrid : event.data.filter || '';
         const dt = event.data.date || '';
-        console.log('Layout received SUBGRID_FILTER message from parent:', sub, dt);
+        const isSingle = event.data.isSingleRun !== undefined ? Boolean(event.data.isSingleRun) : Boolean(event.data.runId);
+        const rId = event.data.runId || null;
+        console.log('Layout received SUBGRID_FILTER message from parent:', sub, dt, isSingle, rId);
         setFilterSubgrid(sub || '');
         setFilterDate(dt || '');
+        setIsSingleRun(isSingle);
+        setRunId(rId);
       } else if (event.data.type === 'CAMERA_ROTATED') {
         setViewState(prev => ({
           ...prev,
@@ -187,10 +205,10 @@ const Layout = ({ isEmbed = false }) => {
       }
     }
 
-    // 2. Date Filter (graceful fallback if date query returns 0 points)
+    // 2. Date Filter
     if (activeDate && activeDate.trim() !== '' && subgridMatched.length > 0) {
       const dateQuery = activeDate.trim().toLowerCase();
-      const dateMatched = subgridMatched.filter(point => {
+      subgridMatched = subgridMatched.filter(point => {
         const rawDate = String(point.captured_at || point.date || point.created_at || '');
         if (!rawDate) return false;
         const pDate = new Date(rawDate);
@@ -209,10 +227,6 @@ const Layout = ({ isEmbed = false }) => {
         }
         return rawDate.toLowerCase().includes(dateQuery);
       });
-
-      if (dateMatched.length > 0) {
-        subgridMatched = dateMatched;
-      }
     }
 
     // Strictly sort points by numerical frame sequence number (e.g. N93E70-0001 -> 0002 -> 0003)
@@ -673,6 +687,8 @@ const Layout = ({ isEmbed = false }) => {
               filterDate={filterDate}
               filterColorByDate={filterColorByDate}
               filterDateStrict={filterDateStrict}
+              isSingleRun={isSingleRun}
+              runId={runId}
               zoomToTrackTrigger={zoomToTrackTrigger}
               resizeTrigger={isViewerOpen ? splitRatio : 100}
               isViewerOpen={isViewerOpen}

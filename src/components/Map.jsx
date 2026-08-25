@@ -173,26 +173,9 @@ const MapController = ({
     }
   }, [map, setMapInstance, setCurrentZoom, onMapMoved]);
 
-  useEffect(() => {
-    if (isStagingPreviewMap && stagedOverlayPoints && stagedOverlayPoints.length > 0) {
-      const latlngs = stagedOverlayPoints
-        .map(p => {
-          const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
-          const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
-          return isNaN(ln) || isNaN(lt) || (ln === 0 && lt === 0) ? null : [lt, ln];
-        })
-        .filter(Boolean);
-
-      if (latlngs.length > 0) {
-        const bounds = L.latLngBounds(latlngs);
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
-      }
-    }
-  }, [isStagingPreviewMap, stagedOverlayPoints, selectedPoint, map]);
 
   useEffect(() => {
-    if (isStagingPreviewMap) return;
-    if (!selectedPoint && filteredPoints && filteredPoints.length > 0) {
+    if (filteredPoints && filteredPoints.length > 0) {
       const latlngs = filteredPoints
         .map(p => {
           const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
@@ -203,10 +186,10 @@ const MapController = ({
 
       if (latlngs.length > 0) {
         const bounds = L.latLngBounds(latlngs);
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
       }
     }
-  }, [isStagingPreviewMap, filteredPoints, selectedPoint, map]);
+  }, [filteredPoints, map, zoomToTrackTrigger]);
 
   useEffect(() => {
     if (selectedPoint) {
@@ -817,6 +800,8 @@ const MapComponent = ({
   filterSubgrid,
   filterDate,
   filterColorByDate,
+  isSingleRun = false,
+  runId = null,
   zoomToTrackTrigger,
   resizeTrigger,
   isViewerOpen,
@@ -901,7 +886,9 @@ const MapComponent = ({
       } else if (e.data?.type === 'FILTER_SUBGRID' || e.data?.type === 'SET_SUBGRID_FILTER') {
         if (e.data.isSingleRun !== undefined) {
           setIsSingleDailyRun(Boolean(e.data.isSingleRun));
-        } else if (!e.data.runId) {
+        } else if (e.data.runId) {
+          setIsSingleDailyRun(true);
+        } else if (e.data.isSingleRun === false || (!e.data.subgrid && !e.data.runId)) {
           setIsSingleDailyRun(false);
         }
       } else if (e.data?.type === 'UPDATE_POINT_DEFECT' || e.data?.type === 'MAP_POINT_DEFECT') {
@@ -928,28 +915,30 @@ const MapComponent = ({
       } else if (e.data?.type === 'SET_STAGED_DATA' || e.data?.type === 'STAGED_DATA_PREVIEW') {
         const isPreview = Boolean(e.data.isStagingPreview === true);
         setIsStagingPreviewMap(isPreview);
-        setIsSingleDailyRun(Boolean(e.data?.isSingleRun));
+        if (e.data.isSingleRun !== undefined) {
+          setIsSingleDailyRun(Boolean(e.data.isSingleRun));
+        } else if (e.data.runId) {
+          setIsSingleDailyRun(true);
+        }
         if (e.data.stagedItems && Array.isArray(e.data.stagedItems)) {
           const sMap = {};
           const extraPoints = [];
           e.data.stagedItems.forEach(item => {
             const sg = (item.subgrid || '').toUpperCase().trim();
             const isItemPub = Boolean(item.isPublished || item.publishToWebGIS === 'yes' || item.publishToUSVPRO === 'yes' || item.isSyncedWithSupabase || item.status === 'yes');
-            if (sg) {
-              if (!sMap[sg] || isItemPub) {
-                sMap[sg] = {
-                  status: isItemPub ? 'yes' : (item.status || 'in process'),
-                  isPublished: isItemPub,
-                  opacity: typeof item.opacity === 'number' ? item.opacity : (isItemPub ? 1.0 : 0.5),
-                  statusColor: item.statusColor || (isItemPub ? '#22c55e' : '#f59e0b')
-                };
-              }
+            if (sg && !sMap[sg]) {
+              sMap[sg] = {
+                status: isItemPub ? 'yes' : (item.status || 'in process'),
+                isPublished: isItemPub,
+                opacity: typeof item.opacity === 'number' ? item.opacity : (isItemPub ? 1.0 : 0.5),
+                statusColor: item.statusColor || (isItemPub ? '#10b981' : '#f59e0b')
+              };
             }
             const pans = item.panoramas || item.points || [];
             if (Array.isArray(pans)) {
               pans.forEach((p, idx) => {
                 const fn = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
-                const isPanPub = Boolean(isItemPub || p.isPublished || p.publishToWebGIS === 'yes' || p.publishToUSVPRO === 'yes' || p.isSyncedWithSupabase || p.status === 'yes');
+                const isPanPub = Boolean(p.isPublished || p.publishToWebGIS === 'yes' || p.publishToUSVPRO === 'yes' || p.isSyncedWithSupabase || p.status === 'yes' || isItemPub);
                 const isPanDefect = Boolean(
                   p.isDefect ||
                   p.is_defect ||
@@ -964,7 +953,7 @@ const MapComponent = ({
                   sMap[fn] = {
                     status: isPanDefect ? 'defect' : isPanPub ? 'yes' : 'in process',
                     isPublished: isPanPub,
-                    color: isPanDefect ? '#ef4444' : isPanPub ? '#22c55e' : '#f59e0b'
+                    color: isPanDefect ? '#ef4444' : isPanPub ? '#10b981' : '#f59e0b'
                   };
                   if (isPanDefect) {
                     setDynamicDefectMap(prev => ({ ...prev, [fn]: true }));
@@ -987,7 +976,7 @@ const MapComponent = ({
                     isDefect: isPanDefect,
                     is_defect: isPanDefect,
                     opacity: isPanDefect ? 1.0 : (isPanPub ? 1.0 : 0.7),
-                    color: isPanDefect ? '#ef4444' : (isPanPub ? '#22c55e' : '#f59e0b')
+                    color: isPanDefect ? '#ef4444' : (isPanPub ? '#10b981' : '#f59e0b')
                   });
                 }
               });
@@ -1029,8 +1018,10 @@ const MapComponent = ({
   }, [activeTool, setActiveTool]);
 
   const effectivePointsList = useMemo(() => {
+    const isSingle = Boolean(isSingleDailyRun || isSingleRun || runId);
+
     // If viewing an individual daily survey run, strictly display only the points of that specific run
-    if (isSingleDailyRun) {
+    if (isSingle) {
       if (stagedOverlayPoints && stagedOverlayPoints.length > 0) {
         return [...stagedOverlayPoints].sort((a, b) => {
           const fnA = (a.filename || a.image_url || '');
@@ -1044,14 +1035,15 @@ const MapComponent = ({
       return [];
     }
 
-    const baseList = (filteredPoints && filteredPoints.length > 0) ? filteredPoints : (points || []);
+    // Masterlist mode: match subgrid strictly without fallback bleed
+    const baseList = filterSubgrid ? (filteredPoints || []) : (filteredPoints && filteredPoints.length > 0 ? filteredPoints : (points || []));
     let combined = baseList;
     if (stagedOverlayPoints && stagedOverlayPoints.length > 0) {
       const activeSub = (filterSubgrid || '').toUpperCase().trim();
       const relevantStaged = activeSub
         ? stagedOverlayPoints.filter(sp => {
             const spSub = (sp.subgrid || '').toUpperCase().trim();
-            return spSub.includes(activeSub) || activeSub.includes(spSub);
+            return spSub === activeSub || spSub.includes(activeSub) || activeSub.includes(spSub);
           })
         : stagedOverlayPoints;
 
@@ -1077,7 +1069,7 @@ const MapComponent = ({
       if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
       return (a.id || 0) - (b.id || 0);
     });
-  }, [filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun]);
+  }, [filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun, isSingleRun, runId]);
 
   const compiled3DPoints = useMemo(() => {
     return effectivePointsList.map(p => {
@@ -1185,18 +1177,27 @@ const MapComponent = ({
             const isDefect = (
               dynamicDefect !== undefined
                 ? Boolean(dynamicDefect)
-                : Boolean(p.is_defect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
+                : Boolean(p.is_defect) || Boolean(p.isDefect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
             );
-            const isStagedPoint = Boolean(
+
+            // Determine if the point is published based on specific stagedInfo or direct properties
+            const isPointPub = stagedItemsMap[fnKey]
+              ? Boolean(stagedItemsMap[fnKey].isPublished)
+              : Boolean(p.isPublished || p.published || p.publishToWebGIS === 'yes' || p.status === 'yes' || (!p.isStagingPreview && !p.isStaged && p.status !== 'in process' && p.status !== 'stitching' && p.publishToWebGIS !== 'in process'));
+
+            const isStagedPoint = !isPointPub && Boolean(
               p.isStagingPreview ||
               p.isStaged ||
-              (stagedInfo && !stagedInfo.isPublished) ||
               p.status === 'in process' ||
               p.status === 'stitching' ||
-              p.publishToWebGIS === 'in process'
+              p.publishToWebGIS === 'in process' ||
+              p.publishToWebGIS === 'need to recheck' ||
+              p.publishToWebGIS === 'no' ||
+              (stagedItemsMap[fnKey] && !stagedItemsMap[fnKey].isPublished)
             );
+
             const isStitching = !isDefect && isStagedPoint;
-            const isPublished = !isDefect && !isStagedPoint;
+            const isPublished = !isDefect && isPointPub;
 
             if (isDefect && !statusFilters.defect) return null;
             if (isPublished && !statusFilters.published) return null;
@@ -1206,7 +1207,7 @@ const MapComponent = ({
               ? (customLayerColors?.defectTrackColor || '#ef4444')
               : isStitching
                 ? (customLayerColors?.stagingTrackColor || '#f59e0b')
-                : (customLayerColors?.publishedTrackColor || '#22c55e');
+                : (customLayerColors?.publishedTrackColor || '#10b981');
 
             const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
               ? customLayerColors.opacity
