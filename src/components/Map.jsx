@@ -951,16 +951,26 @@ const MapComponent = ({
       } else if (e.data?.type === 'SET_STAGED_DATA' || e.data?.type === 'STAGED_DATA_PREVIEW') {
         const isPreview = Boolean(e.data.isStagingPreview === true);
         setIsStagingPreviewMap(isPreview);
-        if (e.data.isSingleRun !== undefined) {
-          setIsSingleDailyRun(Boolean(e.data.isSingleRun));
-        } else if (e.data.runId) {
-          setIsSingleDailyRun(true);
-        }
+        const isSingle = e.data.isSingleRun !== undefined ? Boolean(e.data.isSingleRun) : Boolean(e.data.runId);
+        setIsSingleDailyRun(isSingle);
+
         if (e.data.stagedItems && Array.isArray(e.data.stagedItems)) {
           const sMap = {};
           const extraPoints = [];
-          e.data.stagedItems.forEach(item => {
+          const targetRunId = e.data.runId;
+
+          let itemsToProcess = e.data.stagedItems;
+          if (isSingle && targetRunId && itemsToProcess.length > 1) {
+            const filtered = itemsToProcess.filter(item => {
+              const itemRunId = item.id || item.runId || item.key;
+              return itemRunId === targetRunId || (item.batch_id && targetRunId.includes(item.batch_id));
+            });
+            if (filtered.length > 0) itemsToProcess = filtered;
+          }
+
+          itemsToProcess.forEach(item => {
             const sg = (item.subgrid || '').toUpperCase().trim();
+            const itemRunId = item.id || item.runId || targetRunId || null;
             const isItemPub = Boolean(item.isPublished || item.publishToWebGIS === 'yes' || item.publishToUSVPRO === 'yes' || item.isSyncedWithSupabase || item.status === 'yes');
             if (sg && !sMap[sg]) {
               sMap[sg] = {
@@ -1000,6 +1010,7 @@ const MapComponent = ({
                 if (!isNaN(lat) && !isNaN(lon)) {
                   extraPoints.push({
                     id: p.id || `staged-${sg}-${idx}-${fn || idx}`,
+                    runId: itemRunId,
                     subgrid: sg,
                     filename: p.filename || p.image_url || `${sg}-${idx}`,
                     image_url: p.image_url || p.filename,
@@ -1059,7 +1070,13 @@ const MapComponent = ({
     // If viewing an individual daily survey run, strictly display only the points of that specific run
     if (isSingle) {
       if (stagedOverlayPoints && stagedOverlayPoints.length > 0) {
-        return [...stagedOverlayPoints].sort((a, b) => {
+        let pts = stagedOverlayPoints;
+        const targetRunId = runId || null;
+        if (targetRunId) {
+          const matchingPts = pts.filter(p => p.runId === targetRunId || (p.id && String(p.id).includes(targetRunId)));
+          if (matchingPts.length > 0) pts = matchingPts;
+        }
+        return [...pts].sort((a, b) => {
           const fnA = (a.filename || a.image_url || '');
           const fnB = (b.filename || b.image_url || '');
           const mA = fnA.match(/-(\d+)\./);
