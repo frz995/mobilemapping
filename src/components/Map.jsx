@@ -853,7 +853,10 @@ const MapComponent = ({
 
   const [showPanotrackData, setShowPanotrackData] = useState(true);
   const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
+  const isQaqcWorkbenchMode = new URLSearchParams(window.location.search).has('qaqcWorkbench');
   const [dynamicDefectMap, setDynamicDefectMap] = useState(() => {
+    // In QAQC Workbench mode, start clean — the dashboard will send scoped defects via messages
+    if (isQaqcWorkbenchMode) return {};
     try {
       const initMap = {};
       const cached = JSON.parse(localStorage.getItem('app_qaqc_audit_cache_v2') || '{}');
@@ -970,6 +973,8 @@ const MapComponent = ({
             [fn]: isDefect
           }));
         }
+      } else if (e.data?.type === 'QAQC_DEFECTS_RESET') {
+        setDynamicDefectMap({});
       } else if (e.data?.type === 'QAQC_DEFECTS_SYNC' || e.data?.type === 'SET_DEFECTS_LIST') {
         if (Array.isArray(e.data.defects)) {
           const newMap = {};
@@ -977,7 +982,7 @@ const MapComponent = ({
             const key = (d.filename || d.point_id || d.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
             if (key) newMap[key] = true;
           });
-          setDynamicDefectMap(prev => ({ ...prev, ...newMap }));
+          setDynamicDefectMap(newMap);
         }
       } else if (e.data?.type === 'TOGGLE_BBOX_DRAW') {
         setIsBboxActive(Boolean(e.data.isDrawing));
@@ -1226,13 +1231,16 @@ const MapComponent = ({
     return effectivePointsList.map(p => {
       const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
       const dynamicDefect = dynamicDefectMap[fnKey];
-      const isDefect = dynamicDefect !== undefined ? Boolean(dynamicDefect) : Boolean(p.is_defect);
+      // In QAQC Workbench mode, only trust dynamicDefectMap (dashboard-controlled); ignore Supabase is_defect
+      const isDefect = isQaqcWorkbenchMode
+        ? (dynamicDefect !== undefined ? Boolean(dynamicDefect) : false)
+        : (dynamicDefect !== undefined ? Boolean(dynamicDefect) : Boolean(p.is_defect));
       return {
         ...p,
         color: isDefect ? '#ef4444' : (p.status === 'in process' ? '#f59e0b' : '#22c55e')
       };
     });
-  }, [effectivePointsList, dynamicDefectMap]);
+  }, [effectivePointsList, dynamicDefectMap, isQaqcWorkbenchMode]);
 
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
@@ -1325,7 +1333,9 @@ const MapComponent = ({
             const normSub = rawSub.toUpperCase().trim();
             const stagedInfo = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
 
-            const isDefect = (
+            const isDefect = isQaqcWorkbenchMode
+              ? (dynamicDefect !== undefined ? Boolean(dynamicDefect) : false)
+              : (
               dynamicDefect !== undefined
                 ? Boolean(dynamicDefect)
                 : Boolean(p.is_defect) || Boolean(p.isDefect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
