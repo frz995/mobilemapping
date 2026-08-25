@@ -123,7 +123,17 @@ const Layout = ({ isEmbed = false }) => {
     const handleMessage = (event) => {
       if (!event.data) return;
 
-      if (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID') {
+      if (event.data.type === 'SET_MAP_VIEW_STATE') {
+        const sub = event.data.subgrid || '';
+        const dt = event.data.date || '';
+        const isSingle = event.data.viewMode === 'SINGLE_RUN' || Boolean(event.data.runId);
+        const rId = event.data.runId || null;
+        console.log('Layout received SET_MAP_VIEW_STATE from parent:', sub, dt, isSingle, rId);
+        setFilterSubgrid(sub);
+        setFilterDate(dt);
+        setIsSingleRun(isSingle);
+        setRunId(rId);
+      } else if (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID') {
         const sub = event.data.subgrid !== undefined ? event.data.subgrid : event.data.filter || '';
         const dt = event.data.date || '';
         const isSingle = event.data.isSingleRun !== undefined ? Boolean(event.data.isSingleRun) : Boolean(event.data.runId);

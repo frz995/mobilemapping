@@ -880,6 +880,13 @@ const MapComponent = ({
   const [overrideOpacity, setOverrideOpacity] = useState(1.0);
   const [customTileUrl, setCustomTileUrl] = useState(null);
   const [customLayerColors, setCustomLayerColors] = useState(null);
+  const [mapViewState, setMapViewState] = useState({
+    viewMode: 'ALL',
+    subgrid: '',
+    runId: null,
+    date: '',
+    points: null
+  });
   const [activeRunId, setActiveRunId] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -897,7 +904,24 @@ const MapComponent = ({
 
   useEffect(() => {
     const handleMessage = (e) => {
-      if (e.data?.type === 'SET_THEME') {
+      if (e.data?.type === 'SET_MAP_VIEW_STATE') {
+        const { viewMode, subgrid, runId: msgRunId, date: msgDate, points: directPoints } = e.data;
+        console.log('[Map.jsx SET_MAP_VIEW_STATE]', { viewMode, subgrid, runId: msgRunId, pointsCount: directPoints?.length });
+        setMapViewState({
+          viewMode: viewMode || 'ALL',
+          subgrid: subgrid || '',
+          runId: msgRunId || null,
+          date: msgDate || '',
+          points: Array.isArray(directPoints) ? directPoints : null
+        });
+        if (viewMode === 'SINGLE_RUN' || msgRunId) {
+          setIsSingleDailyRun(true);
+          setActiveRunId(msgRunId || null);
+        } else {
+          setIsSingleDailyRun(false);
+          setActiveRunId(null);
+        }
+      } else if (e.data?.type === 'SET_THEME') {
         const theme = e.data.theme || 'dark';
         document.documentElement.setAttribute('data-theme', theme);
         try {
@@ -973,17 +997,23 @@ const MapComponent = ({
           const targetRunId = e.data.runId;
 
           let itemsToProcess = e.data.stagedItems;
+          console.log('[SET_STAGED_DATA msg]', {
+            isSingle,
+            targetRunId,
+            itemsCount: itemsToProcess.length,
+            items: itemsToProcess.map(it => ({ id: it.id, runId: it.runId, subgrid: it.subgrid, pans: (it.panoramas || it.points || []).length }))
+          });
           if (isSingle && targetRunId && itemsToProcess.length > 1) {
             const filtered = itemsToProcess.filter(item => {
-              const itemRunId = item.id || item.runId || item.key;
-              return itemRunId === targetRunId || (item.batch_id && targetRunId.includes(item.batch_id));
+              const itemRunId = item.runId || item.id || item.key;
+              return Boolean(itemRunId && itemRunId === targetRunId);
             });
             if (filtered.length > 0) itemsToProcess = filtered;
           }
 
-          itemsToProcess.forEach(item => {
+          itemsToProcess.forEach((item, itemIdx) => {
             const sg = (item.subgrid || '').toUpperCase().trim();
-            const itemRunId = item.id || item.runId || targetRunId || null;
+            const itemRunId = item.runId || item.id || (isSingle && itemsToProcess.length === 1 ? targetRunId : `batch-${itemIdx}`);
             const isItemPub = Boolean(item.isPublished || item.publishToWebGIS === 'yes' || item.publishToUSVPRO === 'yes' || item.isSyncedWithSupabase || item.status === 'yes');
             if (sg && !sMap[sg]) {
               sMap[sg] = {
@@ -1020,10 +1050,11 @@ const MapComponent = ({
                 }
                 const lat = parseFloat(p.lat ?? p.latitude ?? p.y);
                 const lon = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+                const pointRunId = p.runId || itemRunId;
                 if (!isNaN(lat) && !isNaN(lon)) {
                   extraPoints.push({
                     id: p.id || `staged-${sg}-${idx}-${fn || idx}`,
-                    runId: itemRunId,
+                    runId: pointRunId,
                     subgrid: sg,
                     filename: p.filename || p.image_url || `${sg}-${idx}`,
                     image_url: p.image_url || p.filename,
@@ -1068,17 +1099,58 @@ const MapComponent = ({
 
   const markerWeight = useMemo(() => {
     if (currentZoom >= 16) return 1.5;
-    return 1.0;
+    if (currentZoom >= 14) return 1;
+    return 0.75;
   }, [currentZoom]);
 
+  const handleManualSelectTool = useCallback((toolId) => {
+    if (setActiveTool) {
+      setActiveTool(prev => (prev === toolId ? null : toolId));
+    }
+  }, [setActiveTool]);
+
+  const handleCloseCoordinatePopup = useCallback(() => {
+    setSelectedPoint(null);
+  }, []);
+
   useEffect(() => {
-    if (activeTool === 'clear') {
-      setActiveTool(null);
+    if (activeTool && activeTool !== 'distance' && activeTool !== 'area') {
+      if (setActiveTool) setActiveTool(null);
     }
   }, [activeTool, setActiveTool]);
 
   const effectivePointsList = useMemo(() => {
+    // 1. Direct Single-Payload View State (Gold Standard - Zero point bleed)
+    if (mapViewState.points && Array.isArray(mapViewState.points) && mapViewState.points.length > 0) {
+      console.log('[effectivePointsList:DirectPayload]', {
+        viewMode: mapViewState.viewMode,
+        pointsCount: mapViewState.points.length,
+        subgrid: mapViewState.subgrid,
+        runId: mapViewState.runId
+      });
+      return [...mapViewState.points].sort((a, b) => {
+        const fnA = (a.filename || a.image_url || '');
+        const fnB = (b.filename || b.image_url || '');
+        const mA = fnA.match(/-(\d+)\./);
+        const mB = fnB.match(/-(\d+)\./);
+        if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
+        return (a.id || 0) - (b.id || 0);
+      });
+    }
+
+    // 2. Legacy fallback
     const isSingle = Boolean(isSingleDailyRun || isSingleRun || runId || activeRunId);
+
+    console.log('[effectivePointsList:Fallback]', {
+      isSingle,
+      isSingleDailyRun,
+      isSingleRun,
+      runId,
+      activeRunId,
+      stagedOverlayCount: stagedOverlayPoints?.length || 0,
+      filteredPointsCount: filteredPoints?.length || 0,
+      pointsCount: points?.length || 0
+    });
 
     // If viewing an individual daily survey run, strictly display only the points of that specific run
     if (isSingle) {
@@ -1086,8 +1158,19 @@ const MapComponent = ({
         let pts = stagedOverlayPoints;
         const targetRunId = activeRunId || runId || null;
         if (targetRunId) {
-          const matchingPts = pts.filter(p => p.runId === targetRunId || (p.id && String(p.id).includes(targetRunId)));
-          if (matchingPts.length > 0) pts = matchingPts;
+          const runIdCounts = {};
+          pts.forEach(p => {
+            const r = String(p.runId || 'undefined');
+            runIdCounts[r] = (runIdCounts[r] || 0) + 1;
+          });
+          const matchingPts = pts.filter(p => p.runId === targetRunId);
+          console.log('[effectivePointsList] single-run filter breakdown:', {
+            targetRunId,
+            totalStaged: pts.length,
+            matchedCount: matchingPts.length,
+            allDistinctRunIds: runIdCounts
+          });
+          pts = matchingPts;
         }
         return [...pts].sort((a, b) => {
           const fnA = (a.filename || a.image_url || '');
@@ -1098,16 +1181,8 @@ const MapComponent = ({
           return (a.id || 0) - (b.id || 0);
         });
       }
-      if (filteredPoints && filteredPoints.length > 0) {
-        return [...filteredPoints].sort((a, b) => {
-          const fnA = (a.filename || a.image_url || '');
-          const fnB = (b.filename || b.image_url || '');
-          const mA = fnA.match(/-(\d+)\./);
-          const mB = fnB.match(/-(\d+)\./);
-          if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
-          return (a.id || 0) - (b.id || 0);
-        });
-      }
+      // In strict single-run mode, do NOT fall back to filteredPoints (which contains all subgrid points)
+      console.log('[effectivePointsList] single-run but no stagedOverlayPoints, returning empty');
       return [];
     }
 
@@ -1145,7 +1220,7 @@ const MapComponent = ({
       if (mA && mB) return parseInt(mA[1], 10) - parseInt(mB[1], 10);
       return (a.id || 0) - (b.id || 0);
     });
-  }, [filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun, isSingleRun, runId, activeRunId]);
+  }, [mapViewState, filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun, isSingleRun, runId, activeRunId]);
 
   const compiled3DPoints = useMemo(() => {
     return effectivePointsList.map(p => {
