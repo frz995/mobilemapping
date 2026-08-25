@@ -854,25 +854,7 @@ const MapComponent = ({
   const [showPanotrackData, setShowPanotrackData] = useState(true);
   const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
   const isQaqcWorkbenchMode = new URLSearchParams(window.location.search).has('qaqcWorkbench');
-  const [dynamicDefectMap, setDynamicDefectMap] = useState(() => {
-    // In QAQC Workbench mode, start clean — the dashboard will send scoped defects via messages
-    if (isQaqcWorkbenchMode) return {};
-    try {
-      const initMap = {};
-      const cached = JSON.parse(localStorage.getItem('app_qaqc_audit_cache_v2') || '{}');
-      Object.values(cached).forEach((rec) => {
-        if (rec && Array.isArray(rec.defectsList)) {
-          rec.defectsList.forEach(d => {
-            const fn = (d.point_id || d.filename || d.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
-            if (fn) initMap[fn] = true;
-          });
-        }
-      });
-      return initMap;
-    } catch (_) {
-      return {};
-    }
-  });
+  const [dynamicDefectMap, setDynamicDefectMap] = useState({});
   const [isBboxActive, setIsBboxActive] = useState(false);
   const [spatialBounds, setSpatialBounds] = useState(null);
 
