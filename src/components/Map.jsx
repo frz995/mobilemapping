@@ -499,7 +499,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
   // Format MapLibre Tile URLs (expands {s} to standard a,b,c subdomains)
   const getFormattedTileUrls = useCallback((url) => {
-    if (!url) return ['https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png'];
+    if (!url) return ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'];
     if (url.includes('{s}')) {
       return ['a', 'b', 'c'].map(s => url.replace('{s}', s));
     }
@@ -512,62 +512,29 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     const initialTileUrls = getFormattedTileUrls(basemap?.url);
 
     // 1. Initialize matching 2D top-down flat perspective
+    const isVectorBasemap = basemap?.isVector || basemap?.url?.includes('styles/');
+
+    const mapStyle = isVectorBasemap ? basemap.url : {
+      version: 8,
+      sources: {
+        'raster-tiles': {
+          type: 'raster',
+          tiles: initialTileUrls,
+          tileSize: 256
+        }
+      },
+      layers: [
+        {
+          id: 'raster-layer',
+          type: 'raster',
+          source: 'raster-tiles'
+        }
+      ]
+    };
+
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: {
-        version: 8,
-        sources: {
-          'raster-tiles': {
-            type: 'raster',
-            tiles: initialTileUrls,
-            tileSize: 256,
-            attribution: basemap?.attribution || ''
-          },
-          'terrain-dem': {
-            type: 'raster-dem',
-            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-            encoding: 'terrarium',
-            tileSize: 256,
-            maxzoom: 14
-          },
-          'openmaptiles': {
-            type: 'vector',
-            url: 'https://tiles.openfreemap.org/planet'
-          }
-        },
-        layers: [
-          {
-            id: 'raster-layer',
-            type: 'raster',
-            source: 'raster-tiles',
-            paint: {
-              'raster-opacity': typeof overrideOpacity === 'number' ? overrideOpacity : 1.0,
-              'raster-resampling': 'linear'
-            }
-          },
-          {
-            id: '3d-buildings',
-            source: 'openmaptiles',
-            'source-layer': 'building',
-            type: 'fill-extrusion',
-            minzoom: 15,
-            paint: {
-              'fill-extrusion-height': [
-                'interpolate', ['linear'], ['zoom'],
-                15, 0,
-                15.5, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]
-              ],
-              'fill-extrusion-base': [
-                'interpolate', ['linear'], ['zoom'],
-                15, 0,
-                15.5, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]
-              ],
-              'fill-extrusion-color': '#cbd5e1',
-              'fill-extrusion-opacity': 0.85
-            }
-          }
-        ]
-      },
+      style: basemap?.url || 'https://tiles.openfreemap.org/styles/positron',
       center: [center[1], center[0]],
       zoom: zoom,
       pitch: 0,
@@ -581,9 +548,59 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
     map.on('load', () => {
       map.resize();
-      map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
 
-      // GeoJSON Source
+      const isVector = basemap?.isVector || basemap?.url?.includes('styles/');
+
+      // 1. Only add terrain if not using a pure external vector style, or handle gracefully
+      if (!isVector) {
+        if (!map.getSource('terrain-dem')) {
+          map.addSource('terrain-dem', {
+            type: 'raster-dem',
+            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+            encoding: 'terrarium',
+            tileSize: 256,
+            maxzoom: 14
+          });
+        }
+        try {
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+        } catch (err) {
+          console.warn('Terrain initialization warning:', err);
+        }
+      }
+
+      // 2. Only inject custom 3D buildings if they don't already exist in the vector style
+      if (!isVector && !map.getLayer('3d-buildings')) {
+        if (!map.getSource('openmaptiles')) {
+          map.addSource('openmaptiles', {
+            type: 'vector',
+            url: 'https://tiles.openfreemap.org/planet'
+          });
+        }
+        map.addLayer({
+          id: '3d-buildings',
+          source: 'openmaptiles',
+          'source-layer': 'building',
+          type: 'fill-extrusion',
+          minzoom: 15,
+          paint: {
+            'fill-extrusion-height': [
+              'interpolate', ['linear'], ['zoom'],
+              15, 0,
+              15.5, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]
+            ],
+            'fill-extrusion-base': [
+              'interpolate', ['linear'], ['zoom'],
+              15, 0,
+              15.5, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]
+            ],
+            'fill-extrusion-color': '#cbd5e1',
+            'fill-extrusion-opacity': 0.85
+          }
+        });
+      }
+
+      // 3. GeoJSON Point Layer (Always safe for both 2D and 3D)
       if (!map.getSource('pts-3d')) {
         map.addSource('pts-3d', {
           type: 'geojson',
@@ -591,9 +608,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         });
       }
 
-
-
-      // 3. Interactive Point Nodes on the Path
+      // 4. Interactive Point Nodes on the Path
       if (!map.getLayer('pts-3d-layer')) {
         map.addLayer({
           id: 'pts-3d-layer',
@@ -625,7 +640,6 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
       update3DSonar();
 
-      // Wait for terrain elevation tiles and building meshes to cache, then trigger smooth camera ease
       // Reset intro animation lock
       isIntroAnimatingRef.current = true;
 
@@ -1070,7 +1084,7 @@ const MapComponent = ({
   }, []);
 
   const basemap = useMemo(() => {
-    const targetId = overrideBasemap || activeBasemap;
+    const targetId = overrideBasemap || activeBasemap || 'ofm-positron';
     return BASEMAPS.find(b => b.id === targetId) || BASEMAPS[0];
   }, [overrideBasemap, activeBasemap]);
 
@@ -1180,9 +1194,9 @@ const MapComponent = ({
       const activeSub = (filterSubgrid || '').toUpperCase().trim();
       const relevantStaged = activeSub
         ? stagedOverlayPoints.filter(sp => {
-            const spSub = (sp.subgrid || '').toUpperCase().trim();
-            return spSub === activeSub || spSub.includes(activeSub) || activeSub.includes(spSub);
-          })
+          const spSub = (sp.subgrid || '').toUpperCase().trim();
+          return spSub === activeSub || spSub.includes(activeSub) || activeSub.includes(spSub);
+        })
         : stagedOverlayPoints;
 
       const existingFilenames = new Set(
@@ -1318,10 +1332,10 @@ const MapComponent = ({
             const isDefect = isQaqcWorkbenchMode
               ? (dynamicDefect !== undefined ? Boolean(dynamicDefect) : false)
               : (
-              dynamicDefect !== undefined
-                ? Boolean(dynamicDefect)
-                : Boolean(p.is_defect) || Boolean(p.isDefect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
-            );
+                dynamicDefect !== undefined
+                  ? Boolean(dynamicDefect)
+                  : Boolean(p.is_defect) || Boolean(p.isDefect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
+              );
 
             // Determine if the point is published based on specific stagedInfo or direct properties
             const isPointPub = stagedItemsMap[fnKey]
