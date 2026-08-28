@@ -456,7 +456,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
 };
 
 // --- WebGL 3D Terrain Viewport (MapLibre Engine) ---
-const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved }) => {
+const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved, pitch3D = 0 }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const sonarMarkerRef = useRef(null);
@@ -537,8 +537,8 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       style: basemap?.url || 'https://tiles.openfreemap.org/styles/positron',
       center: [center[1], center[0]],
       zoom: zoom,
-      pitch: 0,
-      bearing: 0,
+      pitch: pitch3D ? 55 : 0,
+      bearing: pitch3D ? 0 : 0,
       maxPitch: 75,
       fadeDuration: 0,
       crossSourceCollisions: false
@@ -551,8 +551,8 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
       const isVector = basemap?.isVector || basemap?.url?.includes('styles/');
 
-      // 1. Only add terrain if not using a pure external vector style, or handle gracefully
-      if (!isVector) {
+      // 1. Add terrain when 3D mode is active (raster and vector basemaps alike).
+      if (pitch3D) {
         if (!map.getSource('terrain-dem')) {
           map.addSource('terrain-dem', {
             type: 'raster-dem',
@@ -739,6 +739,45 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       map.once('idle', updateBasemapSource);
     }
   }, [basemap, overrideOpacity, getFormattedTileUrls]);
+
+  // Apply / remove 3D perspective+terrain reactively when the 2D/3D mode toggles.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const apply3D = () => {
+      map.setPitch(pitch3D ? 55 : 0);
+      if (pitch3D) {
+        if (!map.getSource('terrain-dem')) {
+          map.addSource('terrain-dem', {
+            type: 'raster-dem',
+            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+            encoding: 'terrarium',
+            tileSize: 256,
+            maxzoom: 14
+          });
+        }
+        try {
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+        } catch (err) {
+          console.warn('Terrain apply warning:', err);
+        }
+      } else {
+        try {
+          map.setTerrain(null);
+        } catch (err) {
+          console.warn('Terrain remove warning:', err);
+        }
+      }
+      map.triggerRepaint();
+    };
+
+    if (map.isStyleLoaded()) {
+      apply3D();
+    } else {
+      map.once('load', apply3D);
+    }
+  }, [pitch3D, basemap]);
 
   // Synchronize 3D Sonar directly to Selected Point Coordinates
   const lastCenterCoordRef = useRef('');
@@ -1088,6 +1127,11 @@ const MapComponent = ({
     return BASEMAPS.find(b => b.id === targetId) || BASEMAPS[0];
   }, [overrideBasemap, activeBasemap]);
 
+  // OpenFreeMap vector styles (e.g. ofm-positron) are MapLibre style JSONs that
+  // cannot be rendered by the Leaflet raster TileLayer. Route them through the
+  // MapLibre renderer so the 2D "flat" view still shows the basemap correctly.
+  const isVectorBasemap = !!(basemap?.isVector || (basemap?.url || '').includes('styles/'));
+
   const isPanotrackVisible = activeLayers.includes('panotrack');
 
   const markerRadius = useMemo(() => {
@@ -1272,7 +1316,7 @@ const MapComponent = ({
       )}
 
       {/* 2D Leaflet View */}
-      {!is3D && (
+      {!is3D && !isVectorBasemap && (
         <MapContainer
           center={mapCenter}
           zoom={currentZoom}
@@ -1402,12 +1446,13 @@ const MapComponent = ({
       )}
 
       {/* 3D MapLibre View */}
-      {is3D && (
+      {(is3D || isVectorBasemap) && (
         <WebGL3DView
           center={mapCenter}
           zoom={currentZoom}
           basemap={basemap}
           overrideOpacity={overrideOpacity}
+          pitch3D={is3D ? 1 : 0}
           points={compiled3DPoints}
           selectedPoint={selectedPoint}
           viewState={viewState}
