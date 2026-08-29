@@ -1475,6 +1475,29 @@ const MapComponent = ({
       } else if (e.data?.type === 'TOGGLE_BBOX_DRAW') {
         setIsBboxActive(Boolean(e.data.isDrawing));
         if (!e.data.isDrawing) setSpatialBounds(null);
+      } else if (e.data?.type === 'QUERY_RENDERED_FEATURES') {
+        if (!mapInstance) return;
+        try {
+          const bbox = e.data.bbox;
+          // bbox should be [[x1, y1], [x2, y2]] in pixel coordinates
+          const features = mapInstance.queryRenderedFeatures(bbox, { layers: ['panotrack-points'] });
+          const points = features.map(f => f.properties);
+          window.parent.postMessage({ type: 'BBOX_POINTS_SELECTED', points }, '*');
+        } catch (err) {
+          console.error("queryRenderedFeatures error:", err);
+        }
+      } else if (e.data?.type === 'QUERY_CLICK_FEATURE') {
+        if (!mapInstance) return;
+        try {
+          const point = e.data.point;
+          // point should be [x, y] in pixel coordinates
+          const features = mapInstance.queryRenderedFeatures(point, { layers: ['panotrack-points'] });
+          if (features && features.length > 0) {
+            window.parent.postMessage({ type: 'MAP_POINT_SELECTED', point: features[0].properties }, '*');
+          }
+        } catch (err) {
+          console.error("queryRenderedFeatures error:", err);
+        }
       } else if (e.data?.type === 'SET_STAGED_DATA' || e.data?.type === 'STAGED_DATA_PREVIEW') {
         const isPreview = Boolean(e.data.isStagingPreview === true);
         setIsStagingPreviewMap(isPreview);
@@ -1533,9 +1556,9 @@ const MapComponent = ({
 
                 if (fn) {
                   sMap[fn] = {
-                    status: isPanDefect ? 'defect' : isPanPub ? 'yes' : 'in process',
+                    status: p.status === 'selected' ? 'selected' : (isPanDefect ? 'defect' : isPanPub ? 'yes' : 'in process'),
                     isPublished: isPanPub,
-                    color: isPanDefect ? '#ef4444' : isPanPub ? '#10b981' : '#f59e0b'
+                    color: p.color || (isPanDefect ? '#ef4444' : isPanPub ? '#10b981' : '#f59e0b')
                   };
                   if (isPanDefect) {
                     setDynamicDefectMap(prev => ({ ...prev, [fn]: true }));
@@ -1559,8 +1582,8 @@ const MapComponent = ({
                     published: isPanPub,
                     isDefect: isPanDefect,
                     is_defect: isPanDefect,
-                    opacity: isPanDefect ? 1.0 : (isPanPub ? 1.0 : 0.7),
-                    color: isPanDefect ? '#ef4444' : (isPanPub ? '#10b981' : '#f59e0b')
+                    opacity: p.opacity ?? (isPanDefect ? 1.0 : (isPanPub ? 1.0 : 0.7)),
+                    color: p.color || (isPanDefect ? '#ef4444' : (isPanPub ? '#10b981' : '#f59e0b'))
                   });
                 }
               });
@@ -1818,7 +1841,7 @@ const MapComponent = ({
               }`}
           >
             <Layers size={13} />
-            <span>2D Flat</span>
+            <span>2D</span>
           </button>
           <button
             onClick={() => setIs3D(true)}
@@ -1828,7 +1851,7 @@ const MapComponent = ({
               }`}
           >
             <Box size={13} />
-            <span>3D Terrain</span>
+            <span>3D</span>
           </button>
         </div>
       )}
@@ -1978,8 +2001,10 @@ const MapComponent = ({
         <WebGL3DView
           // Remount a fresh MapLibre map whenever the selected basemap layer
           // changes (vector style URLs can't be swapped in-place; only raster
-          // tiles can via the reactive raster update effect).
-          key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}`}
+          // tiles can via the reactive raster update effect). Also remount on
+          // 2D/3D toggle so the map always initializes with the correct pitch
+          // and terrain, guaranteeing a clean return to the flat 2D view.
+          key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}-${is3D ? '3d' : '2d'}`}
           center={mapCenter}
           zoom={currentZoom}
           basemap={basemap}
