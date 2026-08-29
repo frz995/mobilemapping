@@ -21,6 +21,55 @@ if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
 const INITIAL_CENTER = [2.54866, 102.815835];
 const INITIAL_ZOOM = 16;
 
+// Collect [lng, lat] outer rings from a GeoJSON geometry. Handles both
+// Polygon and MultiPolygon shapes (states / whole country are MultiPolygon).
+const collectOuterRings = (geom) => {
+  const rings = [];
+  if (!geom) return rings;
+  if (geom.type === 'Polygon' && Array.isArray(geom.coordinates)) {
+    if (Array.isArray(geom.coordinates[0]) && geom.coordinates[0].length >= 4) {
+      rings.push(geom.coordinates[0]);
+    }
+  } else if (geom.type === 'MultiPolygon' && Array.isArray(geom.coordinates)) {
+    geom.coordinates.forEach((poly) => {
+      if (Array.isArray(poly) && Array.isArray(poly[0]) && poly[0].length >= 4) {
+        rings.push(poly[0]);
+      }
+    });
+  }
+  return rings;
+};
+
+// Normalize any accepted boundary payload (FeatureCollection / Feature / raw
+// Polygon or MultiPolygon geometry) into a FeatureCollection of usable
+// Polygon/MultiPolygon features, or null if nothing usable. All features are
+// preserved so multi-feature / whole-country boundaries render fully.
+const normalizeBoundaryGeojson = (input) => {
+  if (!input) return null;
+  let features = [];
+  if (input.type === 'FeatureCollection' && Array.isArray(input.features)) {
+    features = input.features;
+  } else if (input.type === 'Feature') {
+    features = [input];
+  } else if (input.type === 'Polygon' || input.type === 'MultiPolygon') {
+    features = [{ type: 'Feature', properties: {}, geometry: input }];
+  } else if (input.type === 'GeometryCollection' && Array.isArray(input.geometries)) {
+    features = input.geometries
+      .filter((g) => g && (g.type === 'Polygon' || g.type === 'MultiPolygon'))
+      .map((g) => ({ type: 'Feature', properties: {}, geometry: g }));
+  }
+  const usable = features.filter(
+    (f) =>
+      f &&
+      f.type === 'Feature' &&
+      f.geometry &&
+      (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') &&
+      collectOuterRings(f.geometry).length > 0
+  );
+  if (usable.length === 0) return null;
+  return { type: 'FeatureCollection', features: usable };
+};
+
 const toDMS = (deg, type) => {
   const d = Math.floor(Math.abs(deg));
   const minfloat = (Math.abs(deg) - d) * 60;
@@ -122,6 +171,9 @@ const MapController = ({
   isStagingPreviewMap = false,
   selectedPoint,
   activeBasemap,
+  boundaryGeojson = null,
+  boundaryDimActive = false,
+  boundaryFocus = false,
   activeTool,
   setActiveTool,
   zoomToTrackTrigger,
@@ -187,9 +239,14 @@ const MapController = ({
         .filter(Boolean);
 
       if (latlngs.length > 0) {
-        const firstPt = latlngs[0];
-        const lastPt = latlngs[latlngs.length - 1];
-        const boundsKey = `${latlngs.length}_${firstPt[0].toFixed(4)}_${firstPt[1].toFixed(4)}_${lastPt[0].toFixed(4)}_${lastPt[1].toFixed(4)}`;
+        let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+        latlngs.forEach(([lt, ln]) => {
+          if (lt < minLat) minLat = lt;
+          if (lt > maxLat) maxLat = lt;
+          if (ln < minLng) minLng = ln;
+          if (ln > maxLng) maxLng = ln;
+        });
+        const boundsKey = `${latlngs.length}_${minLng.toFixed(4)}_${minLat.toFixed(4)}_${maxLng.toFixed(4)}_${maxLat.toFixed(4)}`;
 
         if (boundsKey !== lastBoundsKeyRef.current) {
           lastBoundsKeyRef.current = boundsKey;
@@ -221,6 +278,80 @@ const MapController = ({
       }
     }
   }, [zoomToTrackTrigger]);
+
+  // Project Geographic Boundary overlay (adaptive stroke + outside-dim mask)
+  const boundaryLayersRef = useRef(null);
+  useEffect(() => {
+    if (!map) return;
+
+    if (boundaryLayersRef.current) {
+      boundaryLayersRef.current.forEach((l) => l.remove());
+      boundaryLayersRef.current = null;
+    }
+
+    const features = Array.isArray(boundaryGeojson?.features) ? boundaryGeojson.features : [];
+    const rings = [];
+    features.forEach((f) => {
+      collectOuterRings(f.geometry).forEach((r) => {
+        const leafletRing = r
+          .filter((c) => Array.isArray(c) && c.length >= 2 && !isNaN(c[0]) && !isNaN(c[1]))
+          .map(([lng, lat]) => [lat, lng]);
+        if (leafletRing.length >= 3) rings.push(leafletRing);
+      });
+    });
+    if (rings.length === 0) return;
+
+    const dark = [
+      'dark', 'carto_dark', 'ofm-dark', 'ofm-fiord', 'fiord',
+      'satellite', 'esri_satellite', 'google-satellite', 'google-hybrid', 'usgs-imagery'
+    ].includes(activeBasemap);
+    const strokeColor = dark ? '#7dd3fc' : '#334155';
+    const hoverColor = dark ? '#38bdf8' : '#1e40af';
+
+    const layers = [];
+
+    rings.forEach((ring) => {
+      const border = L.polygon(ring, { color: strokeColor, weight: 2.5, fill: false, opacity: 1 });
+      border.on('mouseover', () => border.setStyle({ color: hoverColor, weight: 6 }));
+      border.on('mouseout', () => border.setStyle({ color: strokeColor, weight: 2.5 }));
+      border.addTo(map);
+      layers.push(border);
+    });
+
+    if (boundaryDimActive) {
+      const worldRing = [
+        [-85, -179.9], [85, -179.9], [85, 179.9], [-85, 179.9], [-85, -179.9]
+      ];
+      const dimPoly = L.polygon([worldRing, ...rings], {
+        color: dark ? '#38bdf8' : '#334155',
+        weight: 1,
+        fillColor: dark ? '#020617' : '#0f172a',
+        fillOpacity: 0.4,
+        interactive: false
+      });
+      dimPoly.addTo(map);
+      layers.push(dimPoly);
+    }
+
+    boundaryLayersRef.current = layers;
+
+    if (boundaryFocus) {
+      const bounds = rings.reduce((acc, ring) => {
+        acc.extend(ring[0]);
+        return ring.reduce((a, pt) => a.extend(pt), acc);
+      }, L.latLngBounds([]));
+      if (bounds.isValid()) {
+        map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 10, duration: 1.0 });
+      }
+    }
+
+    return () => {
+      if (boundaryLayersRef.current) {
+        boundaryLayersRef.current.forEach((l) => l.remove());
+        boundaryLayersRef.current = null;
+      }
+    };
+  }, [map, boundaryGeojson, boundaryDimActive, boundaryFocus, activeBasemap]);
 
   const lastSelectedCoordsRef = useRef('');
   useEffect(() => {
@@ -456,14 +587,24 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
 };
 
 // --- WebGL 3D Terrain Viewport (MapLibre Engine) ---
-const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved, pitch3D = 0 }) => {
+const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved, pitch3D = 0, boundaryGeojson = null, boundaryDimActive = false, boundaryFocus = false, noSonar = false }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const sonarMarkerRef = useRef(null);
   const sonarConeRef = useRef(null);
   const pointsRef = useRef(points);
   const isIntroAnimatingRef = useRef(true);
+  const lastDataFitKeyRef = useRef('');
+  const applyBoundaryRef = useRef(null);
   pointsRef.current = points;
+
+  // Effective basemap id for adaptive boundary stroke color
+  const effectiveBasemapId = basemap?.id || 'ofm-positron';
+
+  const isDarkBasemap = [
+    'dark', 'carto_dark', 'ofm-dark', 'ofm-fiord', 'fiord',
+    'satellite', 'esri_satellite', 'google-satellite', 'google-hybrid', 'usgs-imagery'
+  ].includes(effectiveBasemapId);
 
   // Robust Coordinate Extractor (Handles lat/lng, latitude/longitude, y/x, arrays)
   const getCoords = useCallback((pt) => {
@@ -478,6 +619,31 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     if (isNaN(lat) || isNaN(lon)) return null;
     return { lat, lon };
   }, []);
+
+  // Compute the [lng,lat] bounding extent of a point list (>= 2 valid points),
+  // plus a stable key so we only auto-fit once per data extent change.
+  const computeDataExtent = useCallback((ptsList) => {
+    const coords = [];
+    (ptsList || []).forEach((p) => {
+      const c = getCoords(p);
+      if (c && !isNaN(c.lat) && !isNaN(c.lon) && !(c.lat === 0 && c.lon === 0)) {
+        coords.push([c.lon, c.lat]);
+      }
+    });
+    if (coords.length < 2) return null;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    coords.forEach(([lng, lat]) => {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    });
+    if (minLng === Infinity) return null;
+    return {
+      bounds: [[minLng, minLat], [maxLng, maxLat]],
+      key: `${coords.length}_${minLng.toFixed(5)}_${minLat.toFixed(5)}_${maxLng.toFixed(5)}_${maxLat.toFixed(5)}`
+    };
+  }, [getCoords]);
 
   const getGeoJSON = useCallback((ptsList) => {
     const features = (ptsList || []).map((p, idx) => {
@@ -534,7 +700,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: basemap?.url || 'https://tiles.openfreemap.org/styles/positron',
+      style: mapStyle,
       center: [center[1], center[0]],
       zoom: zoom,
       pitch: pitch3D ? 55 : 0,
@@ -648,15 +814,37 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       const targetCenter = selCoords ? [selCoords.lon, selCoords.lat] : [center[1], center[0]];
 
       map.once('idle', () => {
-        map.easeTo({
-          center: targetCenter,
-          pitch: 62,
-          bearing: -20,
-          zoom: Math.max(zoom, 16),
-          duration: 1200,
-          easing: (t) => t * (2 - t),
-          essential: true
-        });
+        const is3DMode = Boolean(pitch3D);
+        const extent = computeDataExtent(pointsRef.current);
+
+        // Prefer fitting the full data extent so the whole mapped area is
+        // visible on load; fall back to focusing the selected point / center.
+        if (extent && extent.key !== lastDataFitKeyRef.current) {
+          lastDataFitKeyRef.current = extent.key;
+          map.fitBounds(
+            extent.bounds,
+            {
+              padding: 80,
+              maxZoom: 16,
+              duration: 1200,
+              easing: (t) => t * (2 - t),
+              essential: true
+            }
+          );
+        } else if (!extent) {
+          map.easeTo({
+            center: targetCenter,
+            pitch: is3DMode ? 55 : 0,
+            bearing: is3DMode ? -20 : 0,
+            zoom: Math.max(zoom, 15),
+            duration: 1200,
+            easing: (t) => t * (2 - t),
+            essential: true
+          });
+        } else {
+          map.setPitch(is3DMode ? 55 : 0);
+          map.setBearing(is3DMode ? -20 : 0);
+        }
 
         // Release the lock after animation finishes
         setTimeout(() => {
@@ -670,7 +858,20 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       if (onMapMoved) onMapMoved([c.lat, c.lng], map.getZoom());
     });
 
-    return () => map.remove();
+    // Keep the canvas sized correctly when the container resizes (e.g. the
+    // 360 viewer split panel in the full app), so the dim/line overlay stays.
+    let resizeObserver = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        try { map.resize(); } catch (err) { /* ignore */ }
+      });
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      if (resizeObserver) resizeObserver.disconnect();
+      map.remove();
+    };
   }, []);
 
   // Update GeoJSON source when points change
@@ -684,12 +885,221 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     }
   }, [points, getGeoJSON]);
 
+  // Dynamically fit the camera to the full extent of loaded data so the whole
+  // dashboard map area is visible whenever the dataset extent changes
+  // (initial load, subgrid / run navigation, streaming updates).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const extent = computeDataExtent(points);
+    if (!extent) return;
+    if (extent.key === lastDataFitKeyRef.current) return;
+    // Let the intro animation own the camera on first load; don't fight a
+    // deliberate boundary focus either.
+    if (isIntroAnimatingRef.current || boundaryFocus) return;
+
+    lastDataFitKeyRef.current = extent.key;
+
+    const doFit = () => {
+      try {
+        map.fitBounds(extent.bounds, {
+          padding: 80,
+          maxZoom: 16,
+          duration: 1000,
+          easing: (t) => t * (2 - t),
+          essential: false
+        });
+      } catch (err) { /* ignore */ }
+    };
+    if (map.isStyleLoaded()) doFit();
+    else map.once('load', doFit);
+  }, [points, computeDataExtent, boundaryFocus]);
+
+  // Project Geographic Boundary overlay (adaptive stroke + outside-dim mask)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const applyBoundary = () => {
+      try {
+        const lineColor = isDarkBasemap ? '#7dd3fc' : '#334155';
+        const hoverColor = isDarkBasemap ? '#38bdf8' : '#1e40af';
+
+        const hasBoundary = Boolean(boundaryGeojson && Array.isArray(boundaryGeojson.features) && boundaryGeojson.features.length > 0);
+
+        // Remove layers first each pass (cheap, idempotent)
+        ['project-boundary-dim', 'project-boundary-line-hover', 'project-boundary-line'].forEach((lid) => {
+          if (map.getLayer(lid)) map.removeLayer(lid);
+        });
+        if (map.getSource('project-boundary')) map.removeSource('project-boundary');
+        if (map.getSource('project-boundary-dim-src')) map.removeSource('project-boundary-dim-src');
+
+        if (!hasBoundary) return;
+
+        // Add GeoJSON source
+        map.addSource('project-boundary', {
+          type: 'geojson',
+          data: boundaryGeojson
+        });
+
+        // Border layer (stroke only, no fill)
+        map.addLayer({
+          id: 'project-boundary-line',
+          type: 'line',
+          source: 'project-boundary',
+          paint: {
+            'line-color': lineColor,
+            'line-width': 2.5,
+            'line-opacity': 1,
+            'line-blur': 0.2
+          }
+        });
+
+        // Hover effect line (invisible until hover; brightens & thickens border)
+        map.addLayer({
+          id: 'project-boundary-line-hover',
+          type: 'line',
+          source: 'project-boundary',
+          paint: {
+            'line-color': hoverColor,
+            'line-width': 6,
+            'line-opacity': 0.9,
+            'line-blur': 0.5
+          },
+          layout: { visibility: 'none' }
+        });
+
+        map.on('mouseenter', 'project-boundary-line', () => {
+          map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'visible');
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'project-boundary-line', () => {
+          map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'none');
+          map.getCanvas().style.cursor = '';
+        });
+
+        // Outside-dim mask: world polygon with the project region (all outer
+        // rings, incl. MultiPolygon / multi-feature) as holes (~40% => outside 60%).
+        if (boundaryDimActive) {
+          const holeRings = [];
+          boundaryGeojson.features.forEach((f) => {
+            collectOuterRings(f.geometry).forEach((r) => holeRings.push(r));
+          });
+
+          if (holeRings.length > 0) {
+            const worldRing = [
+              [-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]
+            ];
+            map.addSource('project-boundary-dim-src', {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: [worldRing, ...holeRings]
+                }
+              }
+            });
+            const beforeId = map.getLayer('pts-3d-layer') ? 'pts-3d-layer'
+              : (map.getLayer('3d-buildings') ? '3d-buildings' : undefined);
+            map.addLayer(
+              {
+                id: 'project-boundary-dim',
+                type: 'fill',
+                source: 'project-boundary-dim-src',
+                paint: {
+                  'fill-color': isDarkBasemap ? '#020617' : '#0f172a',
+                  'fill-opacity': 0.4
+                }
+              },
+              beforeId
+            );
+          }
+        }
+      } catch (err) {
+        // Non-fatal boundary render error
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      applyBoundary();
+    } else {
+      map.once('load', applyBoundary);
+    }
+
+    // Self-heal: if the boundary line / dim layers are missing after a camera
+    // move or resize (e.g. panotrack selection easing), re-apply them. This
+    // keeps the outside-dim effect visible even after MapLibre drops layers.
+    const ensureBoundary = () => {
+      try {
+        const hasBoundary = Boolean(boundaryGeojson && Array.isArray(boundaryGeojson.features) && boundaryGeojson.features.length > 0);
+        if (!hasBoundary) return;
+        const lineMissing = !map.getLayer('project-boundary-line');
+        const dimMissing = boundaryDimActive && !map.getLayer('project-boundary-dim');
+        if (lineMissing || dimMissing) applyBoundary();
+      } catch (err) { /* ignore */ }
+    };
+    applyBoundaryRef.current = ensureBoundary;
+    map.on('moveend', ensureBoundary);
+    map.on('idle', ensureBoundary);
+
+    return () => {
+      map.off('moveend', ensureBoundary);
+      map.off('idle', ensureBoundary);
+      try {
+        ['project-boundary-dim', 'project-boundary-line-hover', 'project-boundary-line'].forEach((lid) => {
+          if (map.getLayer(lid)) map.removeLayer(lid);
+        });
+        if (map.getSource('project-boundary')) map.removeSource('project-boundary');
+        if (map.getSource('project-boundary-dim-src')) map.removeSource('project-boundary-dim-src');
+      } catch (err) { /* ignore */ }
+    };
+  }, [boundaryGeojson, boundaryDimActive, basemap, isDarkBasemap]);
+
+  // Focus: fit bounds to the project boundary region (only on focus/geom change)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !boundaryFocus) return;
+
+    const doFit = () => {
+      try {
+        const allRings = [];
+        (boundaryGeojson?.features || []).forEach((f) => {
+          collectOuterRings(f.geometry).forEach((r) => allRings.push(r));
+        });
+        const flat = allRings.flat().filter((c) => Array.isArray(c) && c.length >= 2);
+        if (flat.length > 0) {
+          const lngs = flat.map((c) => c[0]);
+          const lats = flat.map((c) => c[1]);
+          map.fitBounds(
+            [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+            { padding: 60, maxZoom: 10, animate: true }
+          );
+        }
+      } catch (err) { /* ignore */ }
+    };
+
+    if (map.isStyleLoaded()) {
+      doFit();
+    } else {
+      map.once('load', doFit);
+    }
+  }, [boundaryGeojson, boundaryFocus]);
+
   //Reactive Basemap Tile Update
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const updateBasemapSource = () => {
+      // Vector styles carry their own background layers; there is nothing to
+      // swap in-place (a style change remounts WebGL3DView entirely). Only
+      // raster-tile basemaps need the source switched below.
+      const isVectorStyle = basemap?.isVector || basemap?.url?.includes('styles/');
+      const existingRasterSource = map.getSource('raster-tiles');
+      if (isVectorStyle && !existingRasterSource) return;
+
       const newTiles = getFormattedTileUrls(basemap?.url);
       const opacity = typeof overrideOpacity === 'number' ? overrideOpacity : 1.0;
 
@@ -746,7 +1156,6 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     if (!map) return;
 
     const apply3D = () => {
-      map.setPitch(pitch3D ? 55 : 0);
       if (pitch3D) {
         if (!map.getSource('terrain-dem')) {
           map.addSource('terrain-dem', {
@@ -762,11 +1171,37 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         } catch (err) {
           console.warn('Terrain apply warning:', err);
         }
+        try {
+          // Google Maps / Tesla style cinematic fly: pitch up + subtle rotate,
+          // smoothstep easing so the camera accelerates in then settles.
+          map.easeTo({
+            pitch: 62,
+            bearing: -15,
+            duration: 1800,
+            easing: (t) => t * t * (3 - 2 * t),
+            essential: true
+          });
+        } catch (err) {
+          map.setPitch(62);
+          map.setBearing(-15);
+        }
       } else {
         try {
           map.setTerrain(null);
         } catch (err) {
           console.warn('Terrain remove warning:', err);
+        }
+        try {
+          map.easeTo({
+            pitch: 0,
+            bearing: 0,
+            duration: 1800,
+            easing: (t) => t * t * (3 - 2 * t),
+            essential: true
+          });
+        } catch (err) {
+          map.setPitch(0);
+          map.setBearing(0);
         }
       }
       map.triggerRepaint();
@@ -784,6 +1219,13 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
   const update3DSonar = useCallback(() => {
     const map = mapRef.current;
+    if (noSonar) {
+      if (sonarMarkerRef.current) {
+        sonarMarkerRef.current.remove();
+        sonarMarkerRef.current = null;
+      }
+      return;
+    }
     if (!map || !selectedPoint) {
       if (sonarMarkerRef.current) {
         sonarMarkerRef.current.remove();
@@ -840,18 +1282,20 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       sonarConeRef.current.style.transform = `rotate(${viewState.yaw}deg)`;
     }
 
-    // Only pan camera if the initial dive has finished and point changed
+    // Only pan camera if the initial dive has finished and point changed.
+    // Center on the selected point, but only pitch/bear in 3D mode — in 2D
+    // the map must stay flat.
     if (!isIntroAnimatingRef.current && lastCenterCoordRef.current !== coordKey) {
       lastCenterCoordRef.current = coordKey;
       map.easeTo({
         center: targetLngLat,
-        pitch: 60,
-        bearing: -20,
+        pitch: pitch3D ? 60 : 0,
+        bearing: pitch3D ? -20 : 0,
         duration: 350,
         essential: false
       });
     }
-  }, [selectedPoint, viewState?.yaw, getCoords]);
+  }, [selectedPoint, viewState?.yaw, pitch3D, getCoords, noSonar]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -860,6 +1304,10 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     const runSync = () => {
       map.resize();
       update3DSonar();
+      // Re-apply boundary overlay if it got dropped by the resize/selection
+      try {
+        if (applyBoundaryRef.current) applyBoundaryRef.current();
+      } catch (err) { /* ignore */ }
       map.triggerRepaint();
     };
 
@@ -903,6 +1351,8 @@ const MapComponent = ({
   const [currentZoom, setCurrentZoom] = useState(INITIAL_ZOOM);
   const [mapCenter, setMapCenter] = useState(INITIAL_CENTER);
   const isDashboard = isEmbed || new URLSearchParams(window.location.search).has('dashboard') || (window.self !== window.top);
+  const isDeletionMode = new URLSearchParams(window.location.search).has('deletionMode') || new URLSearchParams(window.location.search).has('previewMode');
+  const isNoSonar = new URLSearchParams(window.location.search).has('noSonar') || isDeletionMode;
 
   const [showPanotrackData, setShowPanotrackData] = useState(true);
   const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
@@ -918,6 +1368,9 @@ const MapComponent = ({
   const [overrideOpacity, setOverrideOpacity] = useState(1.0);
   const [customTileUrl, setCustomTileUrl] = useState(null);
   const [customLayerColors, setCustomLayerColors] = useState(null);
+  const [boundaryGeojson, setBoundaryGeojson] = useState(null);
+  const [boundaryFocus, setBoundaryFocus] = useState(false);
+  const [boundaryDimActive, setBoundaryDimActive] = useState(false);
   const [mapViewState, setMapViewState] = useState({
     viewMode: 'ALL',
     subgrid: '',
@@ -1116,16 +1569,85 @@ const MapComponent = ({
           setStagedItemsMap(sMap);
           setStagedOverlayPoints(extraPoints);
         }
+      } else if (e.data?.type === 'SET_PROJECT_BOUNDARY') {
+        const g = normalizeBoundaryGeojson(e.data.geojson);
+        setBoundaryGeojson(g);
+        if (!g) {
+          setBoundaryFocus(false);
+          setBoundaryDimActive(false);
+        }
+      } else if (e.data?.type === 'FOCUS_BOUNDARY') {
+        setBoundaryFocus(true);
+        if (Array.isArray(e.data.bbox) && e.data.bbox.length === 4 && mapInstance) {
+          try {
+            mapInstance.flyToBounds(
+              [
+                [e.data.bbox[1], e.data.bbox[0]],
+                [e.data.bbox[3], e.data.bbox[2]]
+              ],
+              { padding: [60, 60], maxZoom: 10 }
+            );
+          } catch (err) { /* ignore */ }
+        }
+      } else if (e.data?.type === 'CLEAR_BOUNDARY_FOCUS') {
+        setBoundaryFocus(false);
+        setBoundaryDimActive(false);
+      } else if (e.data?.type === 'DIM_OUTSIDE_BOUNDARY') {
+        setBoundaryDimActive(Boolean(e.data.enabled));
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [mapInstance]);
+
+  useEffect(() => {
+    const map = mapInstance;
+    if (!map || typeof map.getBounds !== 'function') return;
+    const postBounds = () => {
+      if (typeof window === 'undefined' || window.parent === window) return;
+      try {
+        const b = map.getBounds();
+        if (!b) return;
+        window.parent.postMessage({
+          type: 'MAP_VIEW_STATE',
+          bounds: {
+            north: b.getNorth(),
+            south: b.getSouth(),
+            east: b.getEast(),
+            west: b.getWest()
+          }
+        }, '*');
+      } catch (err) { /* ignore */ }
+    };
+    map.on('load', postBounds);
+    map.on('moveend', postBounds);
+    map.on('zoomend', postBounds);
+    map.on('resize', postBounds);
+    postBounds();
+    return () => {
+      map.off('load', postBounds);
+      map.off('moveend', postBounds);
+      map.off('zoomend', postBounds);
+      map.off('resize', postBounds);
+    };
+  }, [mapInstance]);
 
   const basemap = useMemo(() => {
     const targetId = overrideBasemap || activeBasemap || 'ofm-positron';
     return BASEMAPS.find(b => b.id === targetId) || BASEMAPS[0];
   }, [overrideBasemap, activeBasemap]);
+
+  // A basemap picked from the sidebar is explicit user intent and wins over
+  // the dashboard-injected override (SET_BASEMAP) until the dashboard sends a
+  // new override. Otherwise, in the embedded Dashboard the pinned override
+  // would make sidebar selections appear to do nothing.
+  const prevActiveBasemap = useRef(activeBasemap);
+  useEffect(() => {
+    if (prevActiveBasemap.current !== activeBasemap) {
+      setOverrideBasemap(null);
+    }
+    prevActiveBasemap.current = activeBasemap;
+  }, [activeBasemap]);
 
   // OpenFreeMap vector styles (e.g. ofm-positron) are MapLibre style JSONs that
   // cannot be rendered by the Leaflet raster TileLayer. Route them through the
@@ -1285,29 +1807,31 @@ const MapComponent = ({
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
       {/* Floating 2D / 3D Mode Switch */}
-      <div className={`absolute top-4 ${isDashboard ? 'right-[108px]' : 'right-4'
-        } z-[1000] flex items-center h-10 bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 shadow-lg backdrop-blur-md transition-all`}>
-        <button
-          onClick={() => setIs3D(false)}
-          className={`flex items-center gap-1.5 px-3 h-full rounded-lg text-xs font-semibold transition-all cursor-pointer ${!is3D
-            ? 'bg-slate-800 text-sky-400 border border-slate-700 shadow-sm'
-            : 'text-slate-400 hover:text-slate-200'
-            }`}
-        >
-          <Layers size={13} />
-          <span>2D Flat</span>
-        </button>
-        <button
-          onClick={() => setIs3D(true)}
-          className={`flex items-center gap-1.5 px-3 h-full rounded-lg text-xs font-semibold transition-all cursor-pointer ${is3D
-            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
-            : 'text-slate-400 hover:text-slate-200'
-            }`}
-        >
-          <Box size={13} />
-          <span>3D Terrain</span>
-        </button>
-      </div>
+      {!isDeletionMode && (
+        <div className={`absolute top-4 ${isDashboard ? 'right-[108px]' : 'right-4'
+          } z-[1000] flex items-center h-10 bg-slate-900/90 border border-slate-700/80 rounded-xl p-1 shadow-lg backdrop-blur-md transition-all`}>
+          <button
+            onClick={() => setIs3D(false)}
+            className={`flex items-center gap-1.5 px-3 h-full rounded-lg text-xs font-semibold transition-all cursor-pointer ${!is3D
+              ? 'bg-slate-800 text-sky-400 border border-slate-700 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+              }`}
+          >
+            <Layers size={13} />
+            <span>2D Flat</span>
+          </button>
+          <button
+            onClick={() => setIs3D(true)}
+            className={`flex items-center gap-1.5 px-3 h-full rounded-lg text-xs font-semibold transition-all cursor-pointer ${is3D
+              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+              }`}
+          >
+            <Box size={13} />
+            <span>3D Terrain</span>
+          </button>
+        </div>
+      )}
 
       {isBboxActive && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center bg-slate-900/90 backdrop-blur-md rounded-xl px-4 py-2 text-xs font-semibold text-sky-400 shadow-lg border border-slate-700/50">
@@ -1340,6 +1864,9 @@ const MapComponent = ({
             isStagingPreviewMap={isStagingPreviewMap}
             selectedPoint={selectedPoint}
             activeBasemap={activeBasemap}
+            boundaryGeojson={boundaryGeojson}
+            boundaryDimActive={boundaryDimActive}
+            boundaryFocus={boundaryFocus}
             activeTool={activeTool}
             setActiveTool={setActiveTool}
             zoomToTrackTrigger={zoomToTrackTrigger}
@@ -1433,6 +1960,7 @@ const MapComponent = ({
           })}
 
           {(() => {
+            if (isNoSonar) return null;
             const coords = extractCoordinates(selectedPoint);
             if (!coords) return null;
             return (
@@ -1448,6 +1976,10 @@ const MapComponent = ({
       {/* 3D MapLibre View */}
       {(is3D || isVectorBasemap) && (
         <WebGL3DView
+          // Remount a fresh MapLibre map whenever the selected basemap layer
+          // changes (vector style URLs can't be swapped in-place; only raster
+          // tiles can via the reactive raster update effect).
+          key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}`}
           center={mapCenter}
           zoom={currentZoom}
           basemap={basemap}
@@ -1455,6 +1987,10 @@ const MapComponent = ({
           pitch3D={is3D ? 1 : 0}
           points={compiled3DPoints}
           selectedPoint={selectedPoint}
+          boundaryGeojson={boundaryGeojson}
+          boundaryDimActive={boundaryDimActive}
+          boundaryFocus={boundaryFocus}
+          noSonar={isNoSonar}
           viewState={viewState}
           onPointSelect={onPointSelect}
           onMapMoved={(c, z) => {
