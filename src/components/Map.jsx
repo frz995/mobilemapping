@@ -858,6 +858,67 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       if (onMapMoved) onMapMoved([c.lat, c.lng], map.getZoom());
     });
 
+    const handleMessage = (e) => {
+      if (!e.data) return;
+      if (e.data.type === 'QUERY_RENDERED_FEATURES') {
+        try {
+          const bbox = e.data.bbox; // [[x1, y1], [x2, y2]]
+          if (!map || !map.isStyleLoaded()) return;
+          const features = map.queryRenderedFeatures(bbox, { layers: ['pts-3d-layer'] });
+          const selected = (features || []).map(f => {
+            try {
+              return JSON.parse(f.properties.rawPoint);
+            } catch {
+              return f.properties;
+            }
+          });
+          window.parent.postMessage({ type: 'BBOX_POINTS_SELECTED', points: selected }, '*');
+        } catch (err) {
+          console.error("queryRenderedFeatures error in WebGL3DView:", err);
+        }
+      } else if (e.data.type === 'QUERY_CLICK_FEATURE') {
+        try {
+          const pt = e.data.point; // [x, y]
+          if (!map || !map.isStyleLoaded()) return;
+          const buffer = 15;
+          const bbox = [[pt[0] - buffer, pt[1] - buffer], [pt[0] + buffer, pt[1] + buffer]];
+          const features = map.queryRenderedFeatures(bbox, { layers: ['pts-3d-layer'] });
+          if (features && features.length > 0) {
+            let selected = features[0].properties;
+            try {
+              selected = JSON.parse(features[0].properties.rawPoint);
+            } catch {}
+            window.parent.postMessage({ type: 'MAP_POINT_SELECTED', point: selected }, '*');
+          }
+        } catch (err) {
+          console.error("queryClickFeature error in WebGL3DView:", err);
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+
+    const postBounds = () => {
+      if (typeof window === 'undefined' || window.parent === window) return;
+      try {
+        const b = map.getBounds();
+        if (!b) return;
+        window.parent.postMessage({
+          type: 'MAP_VIEW_STATE',
+          bounds: {
+            north: b.getNorth(),
+            south: b.getSouth(),
+            east: b.getEast(),
+            west: b.getWest()
+          }
+        }, '*');
+      } catch (err) { /* ignore */ }
+    };
+    map.on('load', postBounds);
+    map.on('moveend', postBounds);
+    map.on('zoomend', postBounds);
+    map.on('resize', postBounds);
+    postBounds();
+
     // Keep the canvas sized correctly when the container resizes (e.g. the
     // 360 viewer split panel in the full app), so the dim/line overlay stays.
     let resizeObserver = null;
@@ -869,6 +930,11 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     }
 
     return () => {
+      window.removeEventListener('message', handleMessage);
+      map.off('load', postBounds);
+      map.off('moveend', postBounds);
+      map.off('zoomend', postBounds);
+      map.off('resize', postBounds);
       if (resizeObserver) resizeObserver.disconnect();
       map.remove();
     };
@@ -1788,18 +1854,33 @@ const MapComponent = ({
         })
         : stagedOverlayPoints;
 
+      const stagedByFilename = new Map();
+      relevantStaged.forEach(sp => {
+        const spKey = (sp.filename || sp.image_url || sp.point_id || sp.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
+        if (spKey) stagedByFilename.set(spKey, sp);
+      });
+
+      const mergedBase = baseList.map(p => {
+        const pKey = (p.filename || p.image_url || p.point_id || p.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
+        if (pKey && stagedByFilename.has(pKey)) {
+          const sp = stagedByFilename.get(pKey);
+          return { ...p, ...sp, color: sp.color || p.color };
+        }
+        return p;
+      });
+
       const existingFilenames = new Set(
         baseList
-          .map(p => (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase())
+          .map(p => (p.filename || p.image_url || p.point_id || p.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase())
           .filter(Boolean)
       );
 
       const extra = relevantStaged.filter(sp => {
-        const spKey = (sp.filename || sp.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+        const spKey = (sp.filename || sp.image_url || sp.point_id || sp.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
         return spKey ? !existingFilenames.has(spKey) : true;
       });
 
-      combined = [...baseList, ...extra];
+      combined = [...mergedBase, ...extra];
     }
 
     return [...combined].sort((a, b) => {
@@ -1814,7 +1895,7 @@ const MapComponent = ({
 
   const compiled3DPoints = useMemo(() => {
     return effectivePointsList.map(p => {
-      const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+      const fnKey = (p.filename || p.image_url || p.point_id || p.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
       const dynamicDefect = dynamicDefectMap[fnKey];
       // In QAQC Workbench mode, only trust dynamicDefectMap (dashboard-controlled); ignore Supabase is_defect
       const isDefect = isQaqcWorkbenchMode
@@ -1822,7 +1903,7 @@ const MapComponent = ({
         : (dynamicDefect !== undefined ? Boolean(dynamicDefect) : Boolean(p.is_defect));
       return {
         ...p,
-        color: isDefect ? '#ef4444' : (p.status === 'in process' ? '#f59e0b' : '#22c55e')
+        color: isDefect ? '#ef4444' : (p.color || (p.status === 'in process' ? '#f59e0b' : '#22c55e'))
       };
     });
   }, [effectivePointsList, dynamicDefectMap, isQaqcWorkbenchMode]);
