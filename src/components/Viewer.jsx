@@ -1,5 +1,8 @@
-import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
+import { Viewer as PSVViewer } from '@photo-sphere-viewer/core';
+import { CubemapTilesAdapter } from '@photo-sphere-viewer/cubemap-tiles-adapter';
+import '@photo-sphere-viewer/core/index.css';
 import {
   MapPin, Ruler, X, Check, Wrench, ChevronRight, ChevronDown,
   ArrowUpDown, Hexagon, Crosshair, Sun, Sliders, CheckCircle2
@@ -7,57 +10,31 @@ import {
 import usePanoramaMeasure from '../hooks/usePanoramaMeasure';
 import PanoramaLightingControl from './PanoramaLightingControl';
 import CameraCalibrationPanel from './CameraCalibrationPanel';
+import { buildCubemapPanorama, resolvePanoramaUrl, resolvePanoramaConfigUrl } from '../services/storage';
 
-// GPU Texture Cache Map
-const textureCache = new Map();
-const MAX_CACHE_SIZE = 12;
+const SPHERE_RADIUS = 500;
 
-function loadGpuTexture(url) {
-  if (!url) return Promise.reject(new Error("No URL provided"));
-  if (textureCache.has(url)) {
-    return Promise.resolve(textureCache.get(url));
-  }
-  return new Promise((resolve, reject) => {
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin('anonymous');
-    loader.load(
-      url,
-      (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.minFilter = THREE.LinearFilter;
-        tex.magFilter = THREE.LinearFilter;
-        tex.generateMipmaps = false;
-
-        if (textureCache.size >= MAX_CACHE_SIZE) {
-          const oldestKey = textureCache.keys().next().value;
-          const oldTex = textureCache.get(oldestKey);
-          if (oldTex) oldTex.dispose();
-          textureCache.delete(oldestKey);
-        }
-        textureCache.set(url, tex);
-        resolve(tex);
-      },
-      undefined,
-      (err) => reject(err)
-    );
-  });
-}
-
-const getAngleDiff = (a, b) => {
-  let diff = a - b;
-  while (diff > 180) diff -= 360;
-  while (diff < -180) diff += 360;
-  return diff;
+// Convert a spherical position (yaw/pitch) to a world point on the measurement sphere.
+// Matches the original Three.js raycast convention (pitch = asin(y/r), yaw = atan2(z,x)).
+const sphericalToWorld = (yawRad, pitchRad) => {
+  const cosP = Math.cos(pitchRad);
+  return {
+    x: SPHERE_RADIUS * cosP * Math.cos(yawRad),
+    y: SPHERE_RADIUS * Math.sin(pitchRad),
+    z: SPHERE_RADIUS * cosP * Math.sin(yawRad)
+  };
 };
+
+const deg2rad = (d) => (d * Math.PI) / 180;
 
 const Viewer = forwardRef(({
   image,
   configUrl,
+  storageConfig,
   initialYaw = 0,
   initialPitch = 0,
   initialHfov = 100,
   onViewChange,
-  hotSpots = [],
   navTargets = [],
   onNavigate,
   selectedPoint,
@@ -67,25 +44,20 @@ const Viewer = forwardRef(({
   const shouldHideToolbox = hideToolbox || searchParams.get('hideToolbox') === 'true' || searchParams.get('viewerOnly') === 'true';
   const containerRef = useRef(null);
 
-  // Three.js Core Refs
+  // PhotoSphereViewer instance
+  const psvRef = useRef(null);
+
+  // Three.js Core Refs (measurement / digitized markers overlay — transparent canvas)
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
-  const materialCurrentRef = useRef(null);
-  const materialTargetRef = useRef(null);
   const animFrameIdRef = useRef(null);
 
   // Scene Mesh Groups
-  const groundArrowsGroupRef = useRef(null);
   const digitizedMarkersGroupRef = useRef(null);
   const measure3DGroupRef = useRef(null); // Native 3D Spatial Measurements Group
 
-  const raycasterRef = useRef(new THREE.Raycaster());
-  const mouseRef = useRef(new THREE.Vector2());
-
-  // Camera Rotation State
-  const isDraggingRef = useRef(false);
-  const dragStartRef = useRef({ x: 0, y: 0 });
+  // Camera Rotation State (mirrors PSV position so the measurement overlay stays aligned)
   const cameraAngleRef = useRef({
     yaw: initialYaw || 0,
     pitch: initialPitch || 0,
@@ -99,8 +71,6 @@ const Viewer = forwardRef(({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [imageSettings, setImageSettings] = useState({ brightness: 100, contrast: 100, saturation: 100 });
-  const [activeHoverArrow, setActiveHoverArrow] = useState(null);
-  const [isFlying, setIsFlying] = useState(false);
 
   // Advanced WebGIS Tools State
   const [activeTool, setActiveTool] = useState(null); // 'digitize' | '3d-measure' | 'vertical-height' | 'polygon-area' | 'coord-inspector'
@@ -139,13 +109,20 @@ const Viewer = forwardRef(({
   const [p2Point, setP2Point] = useState(null);
   const [distanceResult, setDistanceResult] = useState(null);
 
+  // Refs mirroring state/props that the PSV event listeners need fresh each frame (avoids stale closures)
+  const activeToolRef = useRef(activeTool);
+  const selectedPointRef = useRef(selectedPoint);
+  const p1PointRef = useRef(p1Point);
+  const p2PointRef = useRef(p2Point);
+  useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  useEffect(() => { selectedPointRef.current = selectedPoint; }, [selectedPoint]);
+  useEffect(() => { p1PointRef.current = p1Point; }, [p1Point]);
+  useEffect(() => { p2PointRef.current = p2Point; }, [p2Point]);
+
   // Projected Screen Refs (Direct DOM Updates)
   const vMidLabelRef = useRef(null);
   const inspectorLabelRef = useRef(null);
   const polyCenterLabelRef = useRef(null);
-
-  // Screen Projection Tick State - REMOVED for performance
-  // const [, setRenderTick] = useState(0);
 
   // Callback Refs
   const onViewChangeRef = useRef(onViewChange);
@@ -158,19 +135,19 @@ const Viewer = forwardRef(({
     navTargetsRef.current = navTargets;
   }, [onViewChange, onNavigate, navTargets]);
 
-  // Imperative Snapshot Capture
+  // Imperative Snapshot Capture (draw from the PSV canvas)
   useImperativeHandle(ref, () => ({
     captureSnapshot: async (metadata) => {
       try {
-        if (!rendererRef.current) return null;
-        const webglCanvas = rendererRef.current.domElement;
-        if (!webglCanvas) return null;
+        const psv = psvRef.current;
+        const sourceCanvas = psv ? psv.container.querySelector('canvas') : rendererRef.current?.domElement;
+        if (!sourceCanvas) return null;
 
         const canvas = document.createElement('canvas');
-        canvas.width = webglCanvas.width;
-        canvas.height = webglCanvas.height;
+        canvas.width = sourceCanvas.width;
+        canvas.height = sourceCanvas.height;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(webglCanvas, 0, 0);
+        ctx.drawImage(sourceCanvas, 0, 0);
 
         if (metadata) {
           const gradient = ctx.createLinearGradient(0, canvas.height - 80, 0, canvas.height);
@@ -211,57 +188,17 @@ const Viewer = forwardRef(({
     }
   }));
 
-  // Resolve panorama URL
-  const resolvePanoramaUrl = useCallback(async (rawImage, rawConfigUrl) => {
-    if (rawConfigUrl) {
-      try {
-        const res = await fetch(rawConfigUrl);
-        if (res.ok) {
-          const cfg = await res.json();
-          if (cfg.multiRes && cfg.multiRes.fallbackPath) {
-            const basePath = rawConfigUrl.substring(0, rawConfigUrl.lastIndexOf('/') + 1);
-            const fallbackFile = cfg.multiRes.fallbackPath.replace('%s', 'f');
-            return `${basePath}${fallbackFile}`;
-          } else if (cfg.panorama) {
-            let pano = cfg.panorama;
-            if (!pano.startsWith('http') && !pano.startsWith('/')) {
-              const basePath = rawConfigUrl.substring(0, rawConfigUrl.lastIndexOf('/') + 1);
-              pano = `${basePath}${pano}`;
-            }
-            return pano;
-          }
-        }
-      } catch (err) {
-        console.warn("Viewer: Config URL fetch failed:", err);
-      }
-    }
-
-    let url = rawImage;
-    if (url && typeof url === 'string') {
-      if (url.startsWith('/http')) url = url.substring(1);
-      if (url.startsWith('http')) {
-        url = encodeURI(decodeURI(url));
-      } else {
-        const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || import.meta.env.BASE_URL || '/';
-        const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-        if (!url.startsWith(cleanBase)) {
-          url = `${cleanBase}${url.startsWith('/') ? url.substring(1) : url}`;
-        }
-      }
-    }
-    return url;
-  }, []);
-
-  // Update Three.js Camera Orientation Deterministically (YXZ Order)
+  // Apply Three.js measurement camera orientation from the current angle (mirrors PSV).
   const applyCameraMatrix = useCallback((shouldNotify = true) => {
     if (!cameraRef.current) return;
     const angles = cameraAngleRef.current;
 
-    const pitchRad = THREE.MathUtils.degToRad(angles.pitch + extrinsics.pitch);
-    const yawRad = THREE.MathUtils.degToRad(-(angles.yaw + extrinsics.heading));
-    const rollRad = THREE.MathUtils.degToRad(extrinsics.roll);
+    // The measurement overlay must align EXACTLY with PSV's rendered frame, so no
+    // separate extrinsics roll/heading are applied here — PSV owns the panorama frame.
+    const pitchRad = THREE.MathUtils.degToRad(angles.pitch);
+    const yawRad = THREE.MathUtils.degToRad(-angles.yaw); // negate to match PSV's left-hand yaw → world mapping
 
-    const euler = new THREE.Euler(pitchRad, yawRad, rollRad, 'YXZ');
+    const euler = new THREE.Euler(pitchRad, yawRad, 0, 'YXZ');
     cameraRef.current.quaternion.setFromEuler(euler);
 
     cameraRef.current.fov = angles.fov;
@@ -270,59 +207,6 @@ const Viewer = forwardRef(({
     if (shouldNotify && onViewChangeRef.current) {
       onViewChangeRef.current({ yaw: angles.yaw, pitch: angles.pitch, hfov: angles.fov });
     }
-  }, [extrinsics]);
-
-  // Update Ground 3D Navigation Arrows
-  const updateGroundArrows = useCallback(() => {
-    if (!groundArrowsGroupRef.current) return;
-    const group = groundArrowsGroupRef.current;
-
-    while (group.children.length > 0) {
-      const child = group.children[0];
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) child.material.dispose();
-      group.remove(child);
-    }
-
-    const targets = navTargetsRef.current || [];
-    if (targets.length === 0) return;
-
-    targets.forEach((target, index) => {
-      if (!target) return;
-
-      const arrowGroup = new THREE.Group();
-      arrowGroup.userData = { target, isForward: index === 0 };
-
-      const shape = new THREE.Shape();
-      shape.moveTo(0, 8);
-      shape.lineTo(6, -4);
-      shape.lineTo(3, -4);
-      shape.lineTo(0, 0);
-      shape.lineTo(-3, -4);
-      shape.lineTo(-6, -4);
-      shape.closePath();
-
-      const extrudeSettings = { depth: 1.5, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.5, bevelThickness: 0.5 };
-      const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-      geometry.rotateX(-Math.PI / 2);
-
-      const material = new THREE.MeshBasicMaterial({
-        color: index === 0 ? 0x3b82f6 : 0x94a3b8,
-        transparent: true,
-        opacity: 0.85,
-        side: THREE.DoubleSide
-      });
-
-      const mesh = new THREE.Mesh(geometry, material);
-      arrowGroup.add(mesh);
-
-      const radYaw = THREE.MathUtils.degToRad(target.yaw || 0);
-      const radius = 25;
-      arrowGroup.position.set(radius * Math.sin(radYaw), -22, -radius * Math.cos(radYaw));
-      arrowGroup.rotation.y = -radYaw;
-
-      group.add(arrowGroup);
-    });
   }, []);
 
   // Update Native 3D Spatial Measurement Objects in Three.js Scene
@@ -339,7 +223,6 @@ const Viewer = forwardRef(({
 
     // 1. Vertical Height Base (Green) & Top (Red) 3D Boxes & Red Line
     if (verticalBasePoint) {
-      // Base Box (Green)
       const baseGeo = new THREE.BoxGeometry(8, 8, 8);
       const baseMat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
       const baseMesh = new THREE.Mesh(baseGeo, baseMat);
@@ -347,14 +230,12 @@ const Viewer = forwardRef(({
       group.add(baseMesh);
 
       if (verticalTopPoint) {
-        // Top Box (Red)
         const topGeo = new THREE.BoxGeometry(8, 8, 8);
         const topMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
         const topMesh = new THREE.Mesh(topGeo, topMat);
         topMesh.position.set(verticalTopPoint.x, verticalTopPoint.y, verticalTopPoint.z);
         group.add(topMesh);
 
-        // Vertical Red Line connecting Base & Top
         const lineGeo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(verticalBasePoint.x, verticalBasePoint.y, verticalBasePoint.z),
           new THREE.Vector3(verticalTopPoint.x, verticalTopPoint.y, verticalTopPoint.z)
@@ -369,7 +250,6 @@ const Viewer = forwardRef(({
     if (polygonVertices.length > 0) {
       const pointsVec3 = polygonVertices.map(v => new THREE.Vector3(v.x, v.y, v.z));
 
-      // Draw white corner boxes at each vertex
       pointsVec3.forEach(p => {
         const vertexGeo = new THREE.BoxGeometry(6, 6, 6);
         const vertexMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -378,7 +258,6 @@ const Viewer = forwardRef(({
         group.add(vertexMesh);
       });
 
-      // Connect vertices with Magenta/Pink 3D Line Loop (#ec4899)
       if (pointsVec3.length >= 2) {
         const polyGeo = new THREE.BufferGeometry().setFromPoints(pointsVec3);
         const polyMat = new THREE.LineLoop(polyGeo, new THREE.LineBasicMaterial({ color: 0xec4899, linewidth: 4 }));
@@ -387,7 +266,6 @@ const Viewer = forwardRef(({
     }
   }, [verticalBasePoint, verticalTopPoint, polygonVertices]);
 
-  // Update 3D measurement objects when measurement state changes
   useEffect(() => {
     update3DMeasurements();
   }, [update3DMeasurements]);
@@ -395,19 +273,12 @@ const Viewer = forwardRef(({
   // Project 3D vector to 2D Container Pixels (Standard Three.js NDC Frustum Check)
   const projectToScreen = useCallback((vec3) => {
     if (!cameraRef.current || !containerRef.current || !vec3) return null;
-
     const vec = new THREE.Vector3(vec3.x, vec3.y, vec3.z);
     vec.project(cameraRef.current);
 
-    // In Three.js NDC: vec.z < 1.0 means point is IN FRONT of camera frustum
-    if (vec.z >= 1.0) {
-      return null;
-    }
+    if (vec.z >= 1.0) return null;
 
-    // Verify NDC screen bounds
-    if (vec.x < -1.15 || vec.x > 1.15 || vec.y < -1.15 || vec.y > 1.15) {
-      return null;
-    }
+    if (vec.x < -1.15 || vec.x > 1.15 || vec.y < -1.15 || vec.y > 1.15) return null;
 
     const rect = containerRef.current.getBoundingClientRect();
     const x = (vec.x * 0.5 + 0.5) * rect.width;
@@ -415,45 +286,30 @@ const Viewer = forwardRef(({
     return { x, y };
   }, []);
 
-  // Initialize Three.js WebGL Scene & Animation Loop
+  // Initialize the transparent Three.js measurement overlay canvas + animation loop.
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
 
-    // 1. Scene & Camera Setup
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(initialHfov || 75, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(initialHfov || 75, width / height, 0.1, 2000);
     camera.position.set(0, 0, 0);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.pointerEvents = 'none';
+    renderer.domElement.style.zIndex = '5';
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
-
-    // 2. Dual-Sphere Meshes
-    const sphereGeo = new THREE.SphereGeometry(500, 60, 40);
-    sphereGeo.scale(-1, 1, 1);
-
-    const matCurrent = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1.0, side: THREE.DoubleSide });
-    const matTarget = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.0, side: THREE.DoubleSide });
-    materialCurrentRef.current = matCurrent;
-    materialTargetRef.current = matTarget;
-
-    const meshCurrent = new THREE.Mesh(sphereGeo, matCurrent);
-    const meshTarget = new THREE.Mesh(sphereGeo.clone(), matTarget);
-    scene.add(meshCurrent);
-    scene.add(meshTarget);
-
-    // 3. Ground 3D Navigation & Measurement Groups
-    const arrowsGroup = new THREE.Group();
-    scene.add(arrowsGroup);
-    groundArrowsGroupRef.current = arrowsGroup;
 
     const digitizedGroup = new THREE.Group();
     scene.add(digitizedGroup);
@@ -463,71 +319,16 @@ const Viewer = forwardRef(({
     scene.add(measureGroup);
     measure3DGroupRef.current = measureGroup;
 
-    // 4. Smooth 60 FPS Damping Loop
-    let lastNotifyTime = 0;
     const animate = () => {
       animFrameIdRef.current = requestAnimationFrame(animate);
-
-      const angles = cameraAngleRef.current;
-      const now = performance.now();
-
-      const dampingFactor = 0.28;
-      const yawDiff = getAngleDiff(angles.targetYaw, angles.yaw);
-      angles.yaw += yawDiff * dampingFactor;
-
-      angles.targetPitch = Math.max(-85, Math.min(85, angles.targetPitch));
-      angles.pitch += (angles.targetPitch - angles.pitch) * dampingFactor;
-
-      angles.targetFov = Math.max(30, Math.min(110, angles.targetFov));
-      angles.fov += (angles.targetFov - angles.fov) * dampingFactor;
-
-      // Notify parent smoothly at 60fps for hyper-responsive map cone
-      const shouldNotify = now - lastNotifyTime > 16;
-      if (shouldNotify) lastNotifyTime = now;
-
-      applyCameraMatrix(shouldNotify);
-
-      // Update projected labels directly in the loop to avoid React re-renders
-      if (vMidLabelRef.current && verticalHeightResult?.midPoint3D) {
-        const screenPos = projectToScreen(verticalHeightResult.midPoint3D);
-        if (screenPos) {
-          vMidLabelRef.current.style.display = 'block';
-          vMidLabelRef.current.style.left = `${screenPos.x}px`;
-          vMidLabelRef.current.style.top = `${screenPos.y}px`;
-        } else {
-          vMidLabelRef.current.style.display = 'none';
-        }
-      }
-
-      if (inspectorLabelRef.current && inspectorData?.worldPoint) {
-        const screenPos = projectToScreen(inspectorData.worldPoint);
-        if (screenPos) {
-          inspectorLabelRef.current.style.display = 'flex';
-          inspectorLabelRef.current.style.left = `${screenPos.x}px`;
-          inspectorLabelRef.current.style.top = `${screenPos.y}px`;
-        } else {
-          inspectorLabelRef.current.style.display = 'none';
-        }
-      }
-
-      if (polyCenterLabelRef.current && polygonResult?.center3D) {
-        const screenPos = projectToScreen(polygonResult.center3D);
-        if (screenPos) {
-          polyCenterLabelRef.current.style.display = 'block';
-          polyCenterLabelRef.current.style.left = `${screenPos.x}px`;
-          polyCenterLabelRef.current.style.top = `${screenPos.y}px`;
-        } else {
-          polyCenterLabelRef.current.style.display = 'none';
-        }
-      }
-
+      applyCameraMatrix(false);
+      projectLabels();
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
     };
     animate();
 
-    // 5. Resize Observer
     const handleResize = () => {
       if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
       const w = containerRef.current.clientWidth;
@@ -546,226 +347,220 @@ const Viewer = forwardRef(({
         container.removeChild(rendererRef.current.domElement);
         rendererRef.current.dispose();
       }
-      sphereGeo.dispose();
-      matCurrent.dispose();
-      matTarget.dispose();
     };
-  }, [applyCameraMatrix]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Update Ground Arrows when targets change
-  useEffect(() => {
-    updateGroundArrows();
-  }, [navTargets, updateGroundArrows]);
+  // Direct DOM label projection (kept out of React render cycle for performance)
+  const projectLabels = useCallback(() => {
+    if (vMidLabelRef.current && verticalHeightResult?.midPoint3D) {
+      const screenPos = projectToScreen(verticalHeightResult.midPoint3D);
+      if (screenPos) {
+        vMidLabelRef.current.style.display = 'block';
+        vMidLabelRef.current.style.left = `${screenPos.x}px`;
+        vMidLabelRef.current.style.top = `${screenPos.y}px`;
+      } else {
+        vMidLabelRef.current.style.display = 'none';
+      }
+    }
+    if (inspectorLabelRef.current && inspectorData?.worldPoint) {
+      const screenPos = projectToScreen(inspectorData.worldPoint);
+      if (screenPos) {
+        inspectorLabelRef.current.style.display = 'flex';
+        inspectorLabelRef.current.style.left = `${screenPos.x}px`;
+        inspectorLabelRef.current.style.top = `${screenPos.y}px`;
+      } else {
+        inspectorLabelRef.current.style.display = 'none';
+      }
+    }
+    if (polyCenterLabelRef.current && polygonResult?.center3D) {
+      const screenPos = projectToScreen(polygonResult.center3D);
+      if (screenPos) {
+        polyCenterLabelRef.current.style.display = 'block';
+        polyCenterLabelRef.current.style.left = `${screenPos.x}px`;
+        polyCenterLabelRef.current.style.top = `${screenPos.y}px`;
+      } else {
+        polyCenterLabelRef.current.style.display = 'none';
+      }
+    }
+  }, [verticalHeightResult, inspectorData, polygonResult, projectToScreen]);
 
-  // Panorama Load & Dual-Buffer Transition
+  // Keep PSV sized correctly when the split-panel container resizes
   useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(() => {
+      psvRef.current?.refresh?.();
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  // PhotoSphereViewer instance + panorama loading (single equirectangular OR multi-res cubemap tiles)
+  useEffect(() => {
+    if (!containerRef.current) return;
     let isCancelled = false;
 
-    const loadAndTransition = async () => {
+    const loadPanorama = async () => {
       try {
-        const url = await resolvePanoramaUrl(image, configUrl);
-        if (!url || isCancelled) return;
+        let targetPanorama = null;
+        const multiResEnabled = String(storageConfig?.imageStorageStrategy || '').toLowerCase() !== 'single_equirectangular'
+          || storageConfig?.multiResEnabled === true;
+        let useCubemap = Boolean(configUrl) && multiResEnabled;
+        let resolvedImage = '';
 
-        const targetTexture = await loadGpuTexture(url);
-        if (isCancelled) return;
+        if (useCubemap) {
+          const resolvedConfigUrl = /^https?:\/\//i.test(configUrl)
+            ? configUrl
+            : resolvePanoramaConfigUrl(configUrl || image, storageConfig, selectedPoint?.subgrid || '');
+          targetPanorama = buildCubemapPanorama(resolvedConfigUrl);
+        } else if (image) {
+          resolvedImage = await resolvePanoramaUrl(image, storageConfig, {
+            subgrid: selectedPoint?.subgrid || ''
+          });
+          targetPanorama = resolvedImage || image;
+        }
 
-        if (!materialCurrentRef.current.map || materialCurrentRef.current.map === targetTexture) {
-          materialCurrentRef.current.map = targetTexture;
-          materialCurrentRef.current.needsUpdate = true;
-
-          if (!materialCurrentRef.current.map) {
-            cameraAngleRef.current.yaw = initialYaw || 0;
-            cameraAngleRef.current.targetYaw = initialYaw || 0;
-            cameraAngleRef.current.pitch = initialPitch || 0;
-            cameraAngleRef.current.targetPitch = initialPitch || 0;
-          }
-
+        if (isCancelled || !targetPanorama) {
           setIsLoading(false);
-          setError(null);
           return;
         }
 
-        materialTargetRef.current.map = targetTexture;
-        materialTargetRef.current.opacity = 0.0;
-        materialTargetRef.current.needsUpdate = true;
+        // Preloader for single equirectangular images to dismiss the overlay promptly
+        if (!useCubemap && targetPanorama && typeof targetPanorama === 'string') {
+          const preloadImg = new Image();
+          preloadImg.crossOrigin = 'anonymous';
+          preloadImg.onload = () => { if (!isCancelled) setIsLoading(false); };
+          preloadImg.onerror = () => { if (!isCancelled) setIsLoading(false); };
+          preloadImg.src = targetPanorama;
+        }
 
-        setIsFlying(true);
-        const duration = 700;
-        const startTime = performance.now();
-        const startYaw = cameraAngleRef.current.targetYaw;
-        const targetYaw = initialYaw !== undefined ? initialYaw : startYaw;
-        const startFov = cameraAngleRef.current.targetFov;
+        if (psvRef.current) {
+          // Hot-swap the panorama on the existing PSV instance
+          psvRef.current.setPanorama(targetPanorama, { transition: false, showLoader: false })
+            .then(() => {
+              if (!isCancelled) {
+                setIsLoading(false);
+                setError(null);
+              }
+            })
+            .catch((err) => {
+              console.warn('Viewer: setPanorama notice:', err);
+              if (!isCancelled) setIsLoading(false);
+            });
+          return;
+        }
 
-        const animateTransition = (now) => {
-          if (isCancelled) return;
-          const elapsed = now - startTime;
-          const progress = Math.min(elapsed / duration, 1.0);
+        const viewer = new PSVViewer({
+          container: containerRef.current,
+          adapter: useCubemap ? CubemapTilesAdapter : undefined,
+          sphereCorrection: { pan: '0deg' },
+          navbar: false,
+          panorama: targetPanorama,
+          caption: '',
+          defaultYaw: deg2rad(-(initialYaw || 0)),
+          defaultPitch: deg2rad(initialPitch || 0),
+          defaultZoomLvl: 0,
+          touchmoveTwoFingers: false,
+          mousewheel: true,
+          mousewheelCtrlKey: false,
+          loadingImg: undefined,
+          loadingTxt: '',
+          moveSpeed: 1,
+          minFov: 30,
+          maxFov: 110
+        });
 
-          const easeProgress = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-
-          materialCurrentRef.current.opacity = 1.0 - easeProgress;
-          materialTargetRef.current.opacity = easeProgress;
-
-          cameraAngleRef.current.targetYaw = startYaw + getAngleDiff(targetYaw, startYaw) * easeProgress;
-          cameraAngleRef.current.targetFov = startFov;
-
-          if (cameraRef.current) {
-            cameraRef.current.position.set(0, 0, 0);
-          }
-
-          if (progress < 1.0) {
-            requestAnimationFrame(animateTransition);
-          } else {
-            materialCurrentRef.current.map = targetTexture;
-            materialCurrentRef.current.opacity = 1.0;
-            materialCurrentRef.current.needsUpdate = true;
-            materialTargetRef.current.opacity = 0.0;
-
-            if (cameraRef.current) {
-              cameraRef.current.position.set(0, 0, 0);
-            }
-            cameraAngleRef.current.targetFov = startFov;
-            setIsFlying(false);
-
+        viewer.addEventListener('ready', () => { if (!isCancelled) setIsLoading(false); });
+        viewer.addEventListener('panorama-loaded', () => { if (!isCancelled) setIsLoading(false); });
+        viewer.addEventListener('panorama-error', (e) => {
+          console.error('Viewer: PSV panorama error:', e);
+          if (!isCancelled) {
             setIsLoading(false);
-            setError(null);
+            setError('Failed to load 360° imagery');
           }
-        };
+        });
 
-        requestAnimationFrame(animateTransition);
+        // Keep the measurement camera + map cone in sync with PSV at ~60fps
+        viewer.addEventListener('position-updated', ({ position }) => {
+          if (!isCancelled) {
+            const posPitchDeg = (position.pitch * 180) / Math.PI;
+            const posYawDeg = (position.yaw * 180) / Math.PI;
+
+            // Measurement overlay camera stays aligned to PSV's rendered frame.
+            cameraAngleRef.current.yaw = -posYawDeg;
+            cameraAngleRef.current.targetYaw = cameraAngleRef.current.yaw;
+            cameraAngleRef.current.pitch = posPitchDeg;
+            cameraAngleRef.current.targetPitch = cameraAngleRef.current.pitch;
+
+            // Map cone: report the ABSOLUTE compass heading the viewer faces.
+            // PSV starts at defaultYaw = -(bearing), so relative pan from the
+            // vehicle forward = posYawDeg + bearing, and the absolute compass
+            // heading is bearing + relativePan = posYawDeg + 2*bearing.
+            const bearing = initialYaw || 0;
+            const coneYaw = (((posYawDeg + 2 * bearing) % 360) + 360) % 360;
+
+            onViewChangeRef.current?.({
+              yaw: coneYaw,
+              pitch: posPitchDeg,
+              hfov: viewer.getZoomLevel()
+            });
+          }
+        });
+
+        viewer.addEventListener('zoom-updated', ({ zoomLevel }) => {
+          if (!isCancelled) {
+            cameraAngleRef.current.fov = zoomLevel;
+            cameraAngleRef.current.targetFov = zoomLevel;
+          }
+        });
+
+        // Tool clicks: PSV provides yaw/pitch in radians at the click point
+        viewer.addEventListener('click', ({ data }) => {
+          if (isCancelled || !data) return;
+          handleToolClick(data);
+        });
+
+        psvRef.current = viewer;
       } catch (err) {
-        console.error("Viewer: Failed to load panorama texture:", err);
+        console.error("Viewer: Failed to load panorama:", err);
         if (!isCancelled) {
-          setError("Failed to load 360° imagery");
           setIsLoading(false);
-          setIsFlying(false);
+          setError("Failed to load 360° imagery");
         }
       }
     };
 
-    loadAndTransition();
+    loadPanorama();
 
     return () => {
       isCancelled = true;
     };
-  }, [image, configUrl, resolvePanoramaUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image, configUrl, storageConfig, initialYaw, initialPitch]);
 
-  // Pointer Handlers
-  const handlePointerDown = useCallback((e) => {
-    isDraggingRef.current = true;
-    dragStartRef.current = { x: e.clientX || e.touches?.[0]?.clientX || 0, y: e.clientY || e.touches?.[0]?.clientY || 0 };
-  }, []);
+  // Handle tool clicks (from PSV ClickEvent) using spherical yaw/pitch
+  const handleToolClick = useCallback((data) => {
+    const yawRad = data.yaw;
+    const pitchRad = data.pitch;
+    const worldPoint = sphericalToWorld(yawRad, pitchRad);
+    const pitchDeg = (pitchRad * 180) / Math.PI;
+    const yawDeg = (yawRad * 180) / Math.PI;
+    const tool = activeToolRef.current;
 
-  const handlePointerMove = useCallback((e) => {
-    if (!containerRef.current || !cameraRef.current || !sceneRef.current) return;
+    if (tool === 'digitize') {
+      setPendingAssetPoint({ pitch: pitchDeg, yaw: yawDeg, x: worldPoint.x, y: worldPoint.y, z: worldPoint.z });
+    } else if (tool === '3d-measure') {
+      const p1 = p1PointRef.current;
+      const p2 = p2PointRef.current;
+      if (!p1) {
+        setP1Point({ x: worldPoint.x, y: worldPoint.y, z: worldPoint.z });
+      } else if (!p2) {
+        const p2Pt = { x: worldPoint.x, y: worldPoint.y, z: worldPoint.z };
+        setP2Point(p2Pt);
 
-    const clientX = e.clientX || e.touches?.[0]?.clientX || 0;
-    const clientY = e.clientY || e.touches?.[0]?.clientY || 0;
-
-    const rect = containerRef.current.getBoundingClientRect();
-    mouseRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-    mouseRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-
-    // Coordinate Inspector Real-Time Hover Update
-    if (activeTool === 'coord-inspector') {
-      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-      const pointWorld = new THREE.Vector3();
-      raycasterRef.current.ray.at(500, pointWorld);
-
-      const r = pointWorld.length();
-      const pitch = THREE.MathUtils.radToDeg(Math.asin(pointWorld.y / r));
-      const yaw = THREE.MathUtils.radToDeg(Math.atan2(pointWorld.z, pointWorld.x));
-
-      updateInspector(
-        pointWorld,
-        pitch,
-        yaw,
-        selectedPoint?.lat || 0,
-        selectedPoint?.lon || 0,
-        selectedPoint?.elevation || 0
-      );
-    }
-
-    // Raycasting for 3D ground arrows hover
-    if (groundArrowsGroupRef.current) {
-      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-      const intersects = raycasterRef.current.intersectObjects(groundArrowsGroupRef.current.children, true);
-
-      if (intersects.length > 0) {
-        let topGroup = intersects[0].object;
-        while (topGroup.parent && topGroup.parent !== groundArrowsGroupRef.current) {
-          topGroup = topGroup.parent;
-        }
-        if (topGroup.userData && topGroup.userData.target) {
-          containerRef.current.style.cursor = 'pointer';
-          setActiveHoverArrow(topGroup.userData.target);
-          return;
-        }
-      } else {
-        containerRef.current.style.cursor = activeTool ? 'crosshair' : (isDraggingRef.current ? 'grabbing' : 'default');
-        setActiveHoverArrow(null);
-      }
-    }
-
-    if (!isDraggingRef.current) return;
-
-    const dx = clientX - dragStartRef.current.x;
-    const dy = clientY - dragStartRef.current.y;
-    dragStartRef.current = { x: clientX, y: clientY };
-
-    const angles = cameraAngleRef.current;
-    const currentFov = angles.targetFov || 75;
-    const fovFactor = currentFov / 75.0;
-    const sensitivity = 0.13 * fovFactor;
-
-    const deltaYaw = dx * sensitivity;
-    const deltaPitch = dy * sensitivity;
-
-    angles.targetYaw -= deltaYaw;
-    angles.targetPitch += deltaPitch;
-  }, [activeTool, selectedPoint, updateInspector]);
-
-  const handlePointerUp = useCallback(() => {
-    isDraggingRef.current = false;
-  }, []);
-
-  const handleWheel = useCallback((e) => {
-    e.preventDefault();
-    const zoomSensitivity = 0.04;
-    cameraAngleRef.current.targetFov += e.deltaY * zoomSensitivity;
-  }, []);
-
-  // Handle Tool Click Intersections (Exact 500m Sphere Radius)
-  const handleClick = useCallback((e) => {
-    if (activeHoverArrow && onNavigateRef.current) {
-      onNavigateRef.current(activeHoverArrow);
-      return;
-    }
-
-    if (!activeTool || !cameraRef.current) return;
-
-    // Raycast on 500m panorama sphere
-    raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-    const pointWorld = new THREE.Vector3();
-    raycasterRef.current.ray.at(500, pointWorld);
-
-    // Compute Pitch & Yaw of clicked point
-    const r = pointWorld.length();
-    const pitch = THREE.MathUtils.radToDeg(Math.asin(pointWorld.y / r));
-    const yaw = THREE.MathUtils.radToDeg(Math.atan2(pointWorld.z, pointWorld.x));
-
-    if (activeTool === 'digitize') {
-      setPendingAssetPoint({ pitch, yaw, x: pointWorld.x, y: pointWorld.y, z: pointWorld.z });
-    } else if (activeTool === '3d-measure') {
-      if (!p1Point) {
-        setP1Point({ x: pointWorld.x, y: pointWorld.y, z: pointWorld.z });
-      } else if (!p2Point) {
-        const p2 = { x: pointWorld.x, y: pointWorld.y, z: pointWorld.z };
-        setP2Point(p2);
-
-        const dx = p2.x - p1Point.x;
-        const dy = p2.y - p1Point.y;
-        const dz = p2.z - p1Point.z;
+        const dx = p2Pt.x - p1.x;
+        const dy = p2Pt.y - p1.y;
+        const dz = p2Pt.z - p1.z;
         const dist3D = Math.sqrt(dx * dx + dy * dy + dz * dz) * 0.1;
         const horizontalSpan = Math.sqrt(dx * dx + dz * dz) * 0.1;
         const verticalClearance = Math.abs(dy) * 0.1;
@@ -776,23 +571,23 @@ const Viewer = forwardRef(({
           verticalClearance: verticalClearance.toFixed(2)
         });
       }
-    } else if (activeTool === 'vertical-height') {
-      addVerticalPoint(pointWorld, pitch, yaw);
-    } else if (activeTool === 'polygon-area') {
-      addPolygonVertex(pointWorld, pitch, yaw);
-    } else if (activeTool === 'coord-inspector') {
+    } else if (tool === 'vertical-height') {
+      addVerticalPoint(worldPoint, pitchDeg, yawDeg);
+    } else if (tool === 'polygon-area') {
+      addPolygonVertex(worldPoint, pitchDeg, yawDeg);
+    } else if (tool === 'coord-inspector') {
+      const sp = selectedPointRef.current;
       updateInspector(
-        pointWorld,
-        pitch,
-        yaw,
-        selectedPoint?.lat || 0,
-        selectedPoint?.lon || 0,
-        selectedPoint?.elevation || 0
+        worldPoint,
+        pitchDeg,
+        yawDeg,
+        sp?.lat || 0,
+        sp?.lon || 0,
+        sp?.elevation || 0
       );
     }
-  }, [activeHoverArrow, activeTool, p1Point, p2Point, addVerticalPoint, addPolygonVertex, updateInspector, selectedPoint]);
+  }, [addVerticalPoint, addPolygonVertex, updateInspector]);
 
-  // Save Digitized Asset
   const handleSaveAsset = () => {
     if (!pendingAssetPoint) return;
     const newAsset = {
@@ -820,19 +615,10 @@ const Viewer = forwardRef(({
 
   return (
     <div className="w-full h-full relative group bg-black overflow-hidden select-none">
-      {/* Three.js WebGL Container */}
+      {/* PhotoSphereViewer Container */}
       <div
         ref={containerRef}
-        onMouseDown={handlePointerDown}
-        onMouseMove={handlePointerMove}
-        onMouseUp={handlePointerUp}
-        onMouseLeave={handlePointerUp}
-        onTouchStart={handlePointerDown}
-        onTouchMove={handlePointerMove}
-        onTouchEnd={handlePointerUp}
-        onWheel={handleWheel}
-        onClick={handleClick}
-        className={`w-full h-full ${activeTool ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'} transition-transform duration-300 ease-out ${isFlying ? 'scale-[1.03]' : 'scale-100'}`}
+        className={`w-full h-full ${activeTool ? 'cursor-crosshair' : 'cursor-grab'} transition-transform duration-300 ease-out`}
         style={{
           transformOrigin: 'center center',
           filter: `brightness(${imageSettings.brightness}%) contrast(${imageSettings.contrast}%) saturate(${imageSettings.saturation}%)`
@@ -854,13 +640,12 @@ const Viewer = forwardRef(({
         </div>
       )}
 
-      {/* 2. Direct Coordinate Inspector Cursor Box & Single-Line Text (39.199942, 21.409290, -2.350) */}
+      {/* 2. Direct Coordinate Inspector Cursor Box & Single-Line Text */}
       {activeTool === 'coord-inspector' && inspectorData && (
         <div
           ref={inspectorLabelRef}
           className="absolute z-30 pointer-events-none transform -translate-x-1/2 -translate-y-1/2 flex items-center gap-1"
         >
-          {/* Small White Square Target Box Cursor */}
           <div className="w-3 h-3 bg-transparent border-2 border-white shadow-sm shrink-0" />
           <span
             className="text-white text-xs font-bold font-mono tracking-tight whitespace-nowrap"
@@ -871,7 +656,7 @@ const Viewer = forwardRef(({
         </div>
       )}
 
-      {/* 3. Direct Polygon Center Total Overall Area Value Label (e.g. 13.22m² or 123.45m²) Floating at Center of Drawn Area */}
+      {/* 3. Direct Polygon Center Total Overall Area Value Label */}
       {polygonResult && (
         <div
           ref={polyCenterLabelRef}
@@ -910,8 +695,7 @@ const Viewer = forwardRef(({
             <span className="font-semibold text-xs tracking-wide text-gray-800">Toolbox</span>
             <ChevronDown
               size={15}
-              className={`text-blue-600 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] ml-1 ${showToolbox ? 'rotate-180' : 'rotate-0'
-                }`}
+              className={`text-blue-600 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] ml-1 ${showToolbox ? 'rotate-180' : 'rotate-0'}`}
             />
           </button>
 
@@ -1155,13 +939,6 @@ const Viewer = forwardRef(({
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Ground Arrow Hover Tooltip */}
-      {activeHoverArrow && (
-        <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3.5 py-1.5 rounded-full shadow-lg pointer-events-none backdrop-blur-md font-medium tracking-wide flex items-center gap-1.5 animate-pulse z-30">
-          <span>Click to navigate forward ({activeHoverArrow.distance ? `${activeHoverArrow.distance.toFixed(1)}m` : 'Next Frame'})</span>
         </div>
       )}
 

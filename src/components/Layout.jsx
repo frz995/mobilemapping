@@ -15,6 +15,7 @@ import { useSessionStats } from '../hooks/useSessionStats';
 import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera, LogOut, FileText } from 'lucide-react';
 import { generatePdfInspectionReport } from '../services/pdfReportService';
 import * as turf from '@turf/turf';
+import { defaultStorage, resolvePanoramaUrl, resolvePanoramaConfigUrl } from '../services/storage';
 
 const EMPTY_HOTSPOTS = [];
 
@@ -76,6 +77,25 @@ const Layout = ({ isEmbed = false }) => {
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 
   const viewerRef = useRef(null);
+  const [storageConfig, setStorageConfig] = useState(() => defaultStorage());
+
+  // rAF-batched camera batching: the parent (Dashboard) posts CAMERA_ROTATED at
+  // ~60fps. Coalesce per-frame messages into a single setViewState so the map
+  // re-renders at most once per animation frame instead of once per message.
+  const pendingCameraRef = useRef(null); // { yaw, pitch } latest value not yet flushed
+  const cameraFrameRef = useRef(null);   // rAF id
+
+  const flushCameraFrame = React.useCallback(() => {
+    cameraFrameRef.current = null;
+    const pending = pendingCameraRef.current;
+    if (!pending) return;
+    pendingCameraRef.current = null;
+    setViewState(prev => ({
+      ...prev,
+      yaw: typeof pending.yaw === 'number' ? pending.yaw : prev.yaw,
+      pitch: typeof pending.pitch === 'number' ? pending.pitch : prev.pitch,
+    }));
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -123,7 +143,17 @@ const Layout = ({ isEmbed = false }) => {
     const handleMessage = (event) => {
       if (!event.data) return;
 
-      if (event.data.type === 'SET_MAP_VIEW_STATE') {
+      if (event.data.type === 'SET_STORAGE_CONFIG') {
+        if (event.data.storage && typeof event.data.storage === 'object') {
+          setStorageConfig(prev => ({
+            ...defaultStorage(),
+            ...event.data.storage,
+            storageProvider: event.data.storage.storageProvider || prev.storageProvider || 'supabase',
+            supabaseUrl: event.data.storage.supabaseUrl || prev.supabaseUrl || '',
+            supabaseBucket: event.data.storage.supabaseBucket || prev.supabaseBucket || 'MMS_PIC'
+          }));
+        }
+      } else if (event.data.type === 'SET_MAP_VIEW_STATE') {
         const sub = event.data.subgrid || '';
         const dt = event.data.date || '';
         const isSingle = event.data.viewMode === 'SINGLE_RUN' || Boolean(event.data.runId);
@@ -144,11 +174,14 @@ const Layout = ({ isEmbed = false }) => {
         setIsSingleRun(isSingle);
         setRunId(rId);
       } else if (event.data.type === 'CAMERA_ROTATED') {
-        setViewState(prev => ({
-          ...prev,
-          yaw: typeof event.data.yaw === 'number' ? event.data.yaw : prev.yaw,
-          pitch: typeof event.data.pitch === 'number' ? event.data.pitch : prev.pitch
-        }));
+        // Batch: store the latest value and flush once per animation frame.
+        pendingCameraRef.current = {
+          yaw: typeof event.data.yaw === 'number' ? event.data.yaw : undefined,
+          pitch: typeof event.data.pitch === 'number' ? event.data.pitch : undefined,
+        };
+        if (cameraFrameRef.current == null) {
+          cameraFrameRef.current = requestAnimationFrame(flushCameraFrame);
+        }
       } else if (event.data.type === 'MAP_POINT_SELECTED') {
         const pt = event.data.point || event.data.payload || event.data;
         if (pt) {
@@ -166,7 +199,13 @@ const Layout = ({ isEmbed = false }) => {
     };
 
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      if (cameraFrameRef.current != null) {
+        cancelAnimationFrame(cameraFrameRef.current);
+        cameraFrameRef.current = null;
+      }
+    };
   }, []);
 
   const handleZoomToTrack = React.useCallback(() => {
@@ -411,13 +450,37 @@ const Layout = ({ isEmbed = false }) => {
   const handlePointSelect = React.useCallback((point) => {
     if (!point) return;
     const fn = (point.filename || '').replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');
-    const resolvedUrl = (point.image_url && typeof point.image_url === 'string' && point.image_url.trim().length > 0)
-      ? (point.image_url.startsWith('http') || point.image_url.startsWith('/') ? point.image_url : `/MMS_PIC/${point.image_url.replace(/^\/+/, '').replace(/^MMS_PIC\//i, '')}`)
-      : (fn ? `/MMS_PIC/${fn}` : '');
+    const subgrid = point.subgrid || (fn ? fn.replace(/-.*$/, '') : '') || '';
+
+    let resolvedUrl = '';
+    const rawImage = point.image_url || (fn ? fn : '');
+    if (rawImage && typeof rawImage === 'string' && rawImage.trim().length > 0) {
+      if (rawImage.startsWith('http://') || rawImage.startsWith('https://')) {
+        resolvedUrl = rawImage;
+      } else if (rawImage.startsWith('/') && storageConfig?.storageProvider === 'supabase') {
+        // Root-relative path from data → re-resolve against the active bucket.
+        resolvedUrl = resolvePanoramaUrl(fn || rawImage, storageConfig, { subgrid });
+      } else {
+        resolvedUrl = resolvePanoramaUrl(fn || rawImage, storageConfig, { subgrid });
+      }
+    } else if (fn) {
+      resolvedUrl = resolvePanoramaUrl(fn, storageConfig, { subgrid });
+    }
+
+    const isMultiRes = String(storageConfig?.imageStorageStrategy || '').toLowerCase() !== 'single_equirectangular'
+      || storageConfig?.multiResEnabled === true;
+
+    let configUrl = '';
+    if (point.config_url && /^https?:\/\//i.test(point.config_url)) {
+      configUrl = point.config_url;
+    } else if (isMultiRes && fn) {
+      configUrl = resolvePanoramaConfigUrl(fn, storageConfig, subgrid);
+    }
 
     const selectedPt = {
       ...point,
       image_url: resolvedUrl,
+      config_url: configUrl,
       subgrid: point.subgrid || 'KL_Drive_04',
       lat: parseFloat(point.lat ?? point.latitude ?? 2.54866),
       lng: parseFloat(point.lon ?? point.longitude ?? point.lng ?? 102.815835)
@@ -433,7 +496,7 @@ const Layout = ({ isEmbed = false }) => {
         point: selectedPt
       }, '*');
     }
-  }, [trackPointVisit]);
+  }, [trackPointVisit, storageConfig]);
 
   // Calculate clean frame index relative to active dataset (unfiltered unless sidebar filter is selected)
   const currentFrameIndex = React.useMemo(() => {
@@ -600,40 +663,44 @@ const Layout = ({ isEmbed = false }) => {
     if (currentFrameIndex + 2 < filteredPoints.length) pointsToPreload.push(filteredPoints[currentFrameIndex + 2]);
     if (currentFrameIndex - 1 >= 0) pointsToPreload.push(filteredPoints[currentFrameIndex - 1]);
 
+    const isMultiRes = String(storageConfig?.imageStorageStrategy || '').toLowerCase() !== 'single_equirectangular'
+      || storageConfig?.multiResEnabled === true;
+
     pointsToPreload.forEach(point => {
-      // 1. Preload config JSON if tile configUrl is present
-      if (point.config_url) {
-        fetch(point.config_url)
-          .then(res => res.ok ? res.json() : null)
-          .then(config => {
-            if (config && config.multiRes && config.multiRes.fallbackPath) {
-              const basePath = point.config_url.substring(0, point.config_url.lastIndexOf('/') + 1);
-              const fallbackFile = config.multiRes.fallbackPath.replace('%s', 'f');
-              const fallbackUrl = `${basePath}${fallbackFile}`;
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              img.src = fallbackUrl;
-            }
-          })
-          .catch(() => { });
+      const subgrid = point.subgrid || (point.filename ? String(point.filename).replace(/-.*$/, '') : '') || '';
+      // 1. Preload config JSON if tile configUrl is present (multi-res tile pyramid)
+      if ((point.config_url || point.filename) && isMultiRes) {
+        const cfgUrl = point.config_url && /^https?:\/\//i.test(point.config_url)
+          ? point.config_url
+          : resolvePanoramaConfigUrl(point.filename, storageConfig, subgrid);
+        if (cfgUrl) {
+          fetch(cfgUrl)
+            .then(res => res.ok ? res.json() : null)
+            .then(config => {
+              if (config && config.multiRes && config.multiRes.fallbackPath) {
+                const basePath = cfgUrl.substring(0, cfgUrl.lastIndexOf('/') + 1);
+                const fallbackFile = config.multiRes.fallbackPath.replace('%s', 'f');
+                const fallbackUrl = `${basePath}${fallbackFile}`;
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.src = fallbackUrl;
+              }
+            })
+            .catch(() => { });
+        }
       }
 
       // 2. Preload direct image_url
-      if (point.image_url) {
-        let url = point.image_url;
-        if (!url.startsWith('http')) {
-          const baseUrl = import.meta.env.VITE_IMAGE_BASE_URL || '/';
-          const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-          if (!url.startsWith(cleanBase)) {
-            url = `${cleanBase}${url.startsWith('/') ? url.substring(1) : url}`;
-          }
+      if (point.image_url || point.filename) {
+        const url = resolvePanoramaUrl(point.image_url || point.filename, storageConfig, { subgrid });
+        if (url) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = url;
         }
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = url;
       }
     });
-  }, [selectedPoint, filteredPoints]);
+  }, [selectedPoint, filteredPoints, storageConfig]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-50 text-gray-900 relative font-sans">
@@ -775,6 +842,7 @@ const Layout = ({ isEmbed = false }) => {
                 ref={viewerRef}
                 image={selectedPoint.image_url}
                 configUrl={selectedPoint.config_url}
+                storageConfig={storageConfig}
                 initialYaw={selectedPoint.bearing}
                 initialPitch={0}
                 initialHfov={100}
