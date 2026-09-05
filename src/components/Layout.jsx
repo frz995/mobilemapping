@@ -127,6 +127,11 @@ const Layout = ({ isEmbed = false }) => {
     return null;
   });
   const [zoomToTrackTrigger, setZoomToTrackTrigger] = useState(0);
+  // Points supplied by a parent Dashboard (QAQC embed). When present, these
+  // define the track/markers shown for the active subgrid/run (may include
+  // staging/masterlist frames that are not yet published), instead of the
+  // standalone published-only query from useSupabasePoints.
+  const [parentPoints, setParentPoints] = useState(null);
 
   // --- Playback State ---
   const [isPlaying, setIsPlaying] = useState(false);
@@ -165,6 +170,16 @@ const Layout = ({ isEmbed = false }) => {
         setFilterDate(dt);
         setIsSingleRun(isSingle);
         setRunId(rId);
+        // Parent Dashboard carries the exact per-station points for the active
+        // subgrid/run (may include staging frames). When provided, use them.
+        if (Array.isArray(event.data.points) && event.data.points.length > 0) {
+          setParentPoints(event.data.points.map(p => ({
+            ...p,
+            subgrid: p.subgrid || sub,
+            lon: (p.lon ?? p.longitude) != null ? parseFloat(p.lon ?? p.longitude) : null,
+            lat: (p.lat ?? p.latitude) != null ? parseFloat(p.lat ?? p.latitude) : null,
+          })));
+        }
       } else if (event.data.type === 'SET_SUBGRID_FILTER' || event.data.type === 'FILTER_SUBGRID') {
         const sub = event.data.subgrid !== undefined ? event.data.subgrid : event.data.filter || '';
         const dt = event.data.date || '';
@@ -175,6 +190,10 @@ const Layout = ({ isEmbed = false }) => {
         setFilterDate(dt || '');
         setIsSingleRun(isSingle);
         setRunId(rId);
+        // Parent cleared the selection -> fall back to the published dataset.
+        if (!sub) {
+          setParentPoints(null);
+        }
       } else if (event.data.type === 'CAMERA_ROTATED') {
         // Batch: store the latest value and flush once per animation frame.
         pendingCameraRef.current = {
@@ -232,6 +251,25 @@ const Layout = ({ isEmbed = false }) => {
   // --- Filter Logic (Lifted from Map.jsx) ---
   // Filter points based on active subgrid or date range
   const filteredPoints = useMemo(() => {
+    // Parent-supplied points (QAQC embed): already scoped to the active
+    // subgrid/run by the parent, may include staging/masterlist frames not
+    // yet published. Use them verbatim (only re-sorted) so staging tracks draw.
+    if (parentPoints && parentPoints.length > 0) {
+      const stagedSorted = [...parentPoints].sort((a, b) => {
+        const getSeqNum = (item) => {
+          const fn = item.filename || item.image_url || '';
+          const m = String(fn).match(/-(\d+)\./);
+          return m ? parseInt(m[1], 10) : (item.id || 0);
+        };
+        const numA = getSeqNum(a);
+        const numB = getSeqNum(b);
+        if (numA !== numB) return numA - numB;
+        return (a.filename || '').localeCompare(b.filename || '');
+      });
+      console.log(`Layout: Using parent points for track (count: ${stagedSorted.length})`);
+      return stagedSorted;
+    }
+
     if (!points || points.length === 0) return [];
 
     const activeSubgrid = filterSubgrid || '';
@@ -318,7 +356,7 @@ const Layout = ({ isEmbed = false }) => {
 
     console.log(`Layout: Filtered points count: ${subgridMatched.length}/${points.length} (Active Subgrid: "${activeSubgrid}", Date: "${activeDate}")`);
     return subgridMatched;
-  }, [points, filterSubgrid, filterDate, filterDateStrict]);
+  }, [points, parentPoints, filterSubgrid, filterDate, filterDateStrict]);
 
   const handleSnapshot = React.useCallback(async () => {
     if (!viewerRef.current || !selectedPoint) return;
