@@ -10,6 +10,7 @@ import MyAccountModal from './MyAccountModal';
 import useCsvPoints from '../hooks/useCsvPoints';
 import useWfsPoints from '../hooks/useWfsPoints';
 import useAuth from '../hooks/useAuth';
+import usePermissions from '../hooks/usePermissions';
 import { useSupabasePoints } from '../hooks/useSupabasePoints';
 import { useSessionStats } from '../hooks/useSessionStats';
 import { Maximize2, Play, Pause, SkipForward, SkipBack, Camera, LogOut, FileText } from 'lucide-react';
@@ -29,6 +30,7 @@ const parsePointCoords = (p) => {
 
 const Layout = ({ isEmbed = false }) => {
   const { user, signOut } = useAuth();
+  const permissions = usePermissions();
   const {
     stats: usageStats,
     recordSessionStart,
@@ -734,6 +736,7 @@ const Layout = ({ isEmbed = false }) => {
         setIsViewerOpen={setIsViewerOpen}
         onOpenAccount={() => setIsAccountOpen(true)}
         user={user}
+        permissions={permissions}
         signOut={signOut}
       />
 

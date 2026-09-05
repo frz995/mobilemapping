@@ -15,7 +15,7 @@ const MenuLink = ({ icon: Icon, label, active, onClick }) => (
   </button>
 );
 
-const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut }) => {
+const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut, permissions = {} }) => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isBasemapOpen, setIsBasemapOpen] = useState(false);
   const [isToolboxOpen, setIsToolboxOpen] = useState(false);
@@ -275,7 +275,7 @@ const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers,
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className={clsx("truncate text-xs font-bold", isDark ? "text-slate-200" : "text-gray-800")}>{user.email}</p>
-                    <span className={clsx("inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider mt-0.5", isDark ? "bg-blue-950/60 text-blue-400 border border-blue-800/40" : "bg-blue-50 text-blue-600")}>Active Account</span>
+                    <span className={clsx("inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider mt-0.5", isDark ? "bg-blue-950/60 text-sky-400 border border-blue-800/40" : "bg-blue-50 text-blue-600")}>{permissions?.role || "Active Account"}</span>
                   </div>
                 </div>
 

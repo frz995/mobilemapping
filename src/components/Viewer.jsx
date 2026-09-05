@@ -800,6 +800,7 @@ const Viewer = forwardRef(({
                 </button>
 
                 {/* Camera Calibration Panel Toggle */}
+                {canCalibrate !== false && (
                 <button
                   onClick={() => setShowCalibrationPanel(!showCalibrationPanel)}
                   className={`w-full p-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${showCalibrationPanel
@@ -813,6 +814,7 @@ const Viewer = forwardRef(({
                     <span className="text-[9px] text-gray-400 font-normal">Yaw, Pitch, Roll & Height</span>
                   </div>
                 </button>
+                )}
 
                 <div className="my-1 border-t border-gray-100" />
 
