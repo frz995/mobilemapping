@@ -43,11 +43,10 @@ const DEFAULT_PERMISSIONS = {
 function resolveUserRole(user) {
   if (!user) return 'guest';
   const meta = user.user_metadata || {};
+  const appMeta = user.app_metadata || {};
   if (meta.role) return meta.role;
-  const email = (user.email || '').toLowerCase().trim();
-  if (email === 'fariz.farhan95@gmail.com' || email.includes('admin')) return 'Administrator';
-  if (email === 'fariz.kanzuresearch@gmail.com' || email.includes('operator')) return 'Survey Operator';
-  if (email.includes('qa') || email.includes('inspector')) return 'QA Inspector';
+  if (appMeta.role) return appMeta.role;
+  if (user.role && user.role !== 'authenticated') return user.role;
   return 'Viewer';
 }
 
