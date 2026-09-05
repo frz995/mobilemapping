@@ -3,7 +3,7 @@ import { supabase } from '../services/supabase';
 
 function extractSubgrid(text) {
     if (!text) return '';
-    const match = String(text).match(/N\d{2,3}E\d{2,3}/i);
+    const match = String(text).match(/Nd{2,3}Ed{2,3}/i);
     return match ? match[0].toUpperCase() : '';
 }
 
@@ -17,10 +17,48 @@ export function useSupabasePoints() {
             try {
                 setLoading(true);
 
-                const { data, error: supabaseError } = await supabase
+                let sourceData = [];
+
+                // 1. Primary query: panoramas_view
+                const { data: viewData, error: viewError } = await supabase
                     .from('panoramas_view')
                     .select('*')
                     .order('filename', { ascending: true });
+
+                if (!viewError && Array.isArray(viewData) && viewData.length > 0) {
+                    sourceData = viewData;
+                } else {
+                    if (viewError) console.warn('[useSupabasePoints] panoramas_view notice:', viewError.message);
+                    // 2. Resilient Fallback: direct query to panoramas table
+                    const { data: tableData, error: tableError } = await supabase
+                        .from('panoramas')
+                        .select('*')
+                        .order('filename', { ascending: true });
+
+                    if (!tableError && Array.isArray(tableData) && tableData.length > 0) {
+                        console.info('[useSupabasePoints] Successfully retrieved points from fallback panoramas table. Count:', tableData.length);
+                        sourceData = tableData.map(row => {
+                            let lon = row.longitude ?? row.lon;
+                            let lat = row.latitude ?? row.lat;
+                            if ((lon == null || lat == null) && Array.isArray(row.coordinates) && row.coordinates.length >= 2) {
+                                lon = row.coordinates[0];
+                                lat = row.coordinates[1];
+                            } else if ((lon == null || lat == null) && row.geom?.coordinates && Array.isArray(row.geom.coordinates)) {
+                                lon = row.geom.coordinates[0];
+                                lat = row.geom.coordinates[1];
+                            }
+                            return {
+                                ...row,
+                                longitude: lon,
+                                latitude: lat,
+                                lon,
+                                lat
+                            };
+                        });
+                    } else if (tableError) {
+                        console.error('[useSupabasePoints] panoramas table fallback error:', tableError.message);
+                    }
+                }
 
                 let qaMap = new Map();
                 try {
@@ -35,10 +73,10 @@ export function useSupabasePoints() {
                     console.warn('qa_defects fetch notice:', e);
                 }
 
-                if (supabaseError || !data || data.length === 0) {
+                if (!sourceData || sourceData.length === 0) {
                     setPoints([]);
                 } else {
-                    const formattedPoints = data.map(item => {
+                    const formattedPoints = sourceData.map(item => {
                         const rawSubgrid = item.subgrid || extractSubgrid(item.filename || item.image_url || item.description);
                         const cleanFn = (item.filename || '').replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');
                         const cleanFnUpper = cleanFn.toUpperCase();
@@ -135,7 +173,7 @@ export function useSupabasePoints() {
                     setPoints(sortGeographicallyByRoadTrack(formattedPoints));
                 }
             } catch (err) {
-                console.error('Error fetching panoramas_view:', err);
+                console.error('Error fetching panoramas data:', err);
                 setPoints([]);
                 setError(err.message);
             } finally {
