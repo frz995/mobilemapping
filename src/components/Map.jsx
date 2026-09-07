@@ -281,6 +281,7 @@ const MapController = ({
 
   // Project Geographic Boundary overlay (adaptive stroke + outside-dim mask)
   const boundaryLayersRef = useRef(null);
+  const lastBoundaryKeyRef = useRef('');
   useEffect(() => {
     if (!map) return;
 
@@ -299,7 +300,10 @@ const MapController = ({
         if (leafletRing.length >= 3) rings.push(leafletRing);
       });
     });
-    if (rings.length === 0) return;
+    if (rings.length === 0) {
+      lastBoundaryKeyRef.current = '';
+      return;
+    }
 
     const dark = [
       'dark', 'carto_dark', 'ofm-dark', 'ofm-fiord', 'fiord',
@@ -311,37 +315,33 @@ const MapController = ({
     const layers = [];
 
     rings.forEach((ring) => {
-      const border = L.polygon(ring, { color: strokeColor, weight: 2.5, fill: false, opacity: 1 });
-      border.on('mouseover', () => border.setStyle({ color: hoverColor, weight: 6 }));
-      border.on('mouseout', () => border.setStyle({ color: strokeColor, weight: 2.5 }));
+      const border = L.polygon(ring, {
+        color: strokeColor,
+        weight: 2.5,
+        fillColor: 'transparent',
+        fill: false,
+        fillOpacity: 0,
+        opacity: 1
+      });
+      border.on('mouseover', () => border.setStyle({ color: hoverColor, weight: 4, fillOpacity: 0 }));
+      border.on('mouseout', () => border.setStyle({ color: strokeColor, weight: 2.5, fillOpacity: 0 }));
       border.addTo(map);
       layers.push(border);
     });
 
-    if (boundaryDimActive) {
-      const worldRing = [
-        [-85, -179.9], [85, -179.9], [85, 179.9], [-85, 179.9], [-85, -179.9]
-      ];
-      const dimPoly = L.polygon([worldRing, ...rings], {
-        color: dark ? '#38bdf8' : '#334155',
-        weight: 1,
-        fillColor: dark ? '#020617' : '#0f172a',
-        fillOpacity: 0.4,
-        interactive: false
-      });
-      dimPoly.addTo(map);
-      layers.push(dimPoly);
-    }
-
     boundaryLayersRef.current = layers;
 
-    if (boundaryFocus) {
+    if (boundaryFocus || isEmbed || isDeletionMode) {
       const bounds = rings.reduce((acc, ring) => {
-        acc.extend(ring[0]);
-        return ring.reduce((a, pt) => a.extend(pt), acc);
+        ring.forEach((pt) => acc.extend(pt));
+        return acc;
       }, L.latLngBounds([]));
       if (bounds.isValid()) {
-        map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 10, duration: 1.0 });
+        const key = bounds.toBBoxString();
+        if (key !== lastBoundaryKeyRef.current) {
+          lastBoundaryKeyRef.current = key;
+          map.fitBounds(bounds, { padding: [25, 25], maxZoom: 14, animate: true, duration: 0.5 });
+        }
       }
     }
 
@@ -351,7 +351,7 @@ const MapController = ({
         boundaryLayersRef.current = null;
       }
     };
-  }, [map, boundaryGeojson, boundaryDimActive, boundaryFocus, activeBasemap]);
+  }, [map, boundaryGeojson, boundaryDimActive, boundaryFocus, activeBasemap, isEmbed, isDeletionMode]);
 
   const lastSelectedCoordsRef = useRef('');
   useEffect(() => {
@@ -995,7 +995,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         const hasBoundary = Boolean(boundaryGeojson && Array.isArray(boundaryGeojson.features) && boundaryGeojson.features.length > 0);
 
         // Remove layers first each pass (cheap, idempotent)
-        ['project-boundary-dim', 'project-boundary-line-hover', 'project-boundary-line'].forEach((lid) => {
+        ['project-boundary-dim', 'project-boundary-line-hover', 'project-boundary-line', 'project-boundary-fill'].forEach((lid) => {
           if (map.getLayer(lid)) map.removeLayer(lid);
         });
         if (map.getSource('project-boundary')) map.removeSource('project-boundary');
@@ -1009,7 +1009,18 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
           data: boundaryGeojson
         });
 
-        // Border layer (stroke only, no fill)
+        // District polygon (stroke/outline only, no fill color)
+        map.addLayer({
+          id: 'project-boundary-fill',
+          type: 'fill',
+          source: 'project-boundary',
+          paint: {
+            'fill-color': 'transparent',
+            'fill-opacity': 0
+          }
+        });
+
+        // Border layer (stroke)
         map.addLayer({
           id: 'project-boundary-line',
           type: 'line',
@@ -1044,45 +1055,6 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
           map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'none');
           map.getCanvas().style.cursor = '';
         });
-
-        // Outside-dim mask: world polygon with the project region (all outer
-        // rings, incl. MultiPolygon / multi-feature) as holes (~40% => outside 60%).
-        if (boundaryDimActive) {
-          const holeRings = [];
-          boundaryGeojson.features.forEach((f) => {
-            collectOuterRings(f.geometry).forEach((r) => holeRings.push(r));
-          });
-
-          if (holeRings.length > 0) {
-            const worldRing = [
-              [-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]
-            ];
-            map.addSource('project-boundary-dim-src', {
-              type: 'geojson',
-              data: {
-                type: 'Feature',
-                geometry: {
-                  type: 'Polygon',
-                  coordinates: [worldRing, ...holeRings]
-                }
-              }
-            });
-            const beforeId = map.getLayer('pts-3d-layer') ? 'pts-3d-layer'
-              : (map.getLayer('3d-buildings') ? '3d-buildings' : undefined);
-            map.addLayer(
-              {
-                id: 'project-boundary-dim',
-                type: 'fill',
-                source: 'project-boundary-dim-src',
-                paint: {
-                  'fill-color': isDarkBasemap ? '#020617' : '#0f172a',
-                  'fill-opacity': 0.4
-                }
-              },
-              beforeId
-            );
-          }
-        }
       } catch (err) {
         // Non-fatal boundary render error
       }
@@ -1417,7 +1389,11 @@ const MapComponent = ({
   const [currentZoom, setCurrentZoom] = useState(INITIAL_ZOOM);
   const [mapCenter, setMapCenter] = useState(INITIAL_CENTER);
   const isDashboard = isEmbed || new URLSearchParams(window.location.search).has('dashboard') || (window.self !== window.top);
-  const isDeletionMode = new URLSearchParams(window.location.search).has('deletionMode') || new URLSearchParams(window.location.search).has('previewMode');
+  const isDeletionMode = new URLSearchParams(window.location.search).has('deletionMode') ||
+    new URLSearchParams(window.location.search).has('previewMode') ||
+    new URLSearchParams(window.location.search).has('no3D') ||
+    new URLSearchParams(window.location.search).has('hide3D') ||
+    new URLSearchParams(window.location.search).has('preview');
   const isNoSonar = new URLSearchParams(window.location.search).has('noSonar') || isDeletionMode;
 
   const [showPanotrackData, setShowPanotrackData] = useState(true);
@@ -1664,17 +1640,19 @@ const MapComponent = ({
         if (!g) {
           setBoundaryFocus(false);
           setBoundaryDimActive(false);
+        } else {
+          setBoundaryFocus(true);
         }
       } else if (e.data?.type === 'FOCUS_BOUNDARY') {
         setBoundaryFocus(true);
         if (Array.isArray(e.data.bbox) && e.data.bbox.length === 4 && mapInstance) {
           try {
-            mapInstance.flyToBounds(
+            mapInstance.fitBounds(
               [
                 [e.data.bbox[1], e.data.bbox[0]],
                 [e.data.bbox[3], e.data.bbox[2]]
               ],
-              { padding: [60, 60], maxZoom: 10 }
+              { padding: [25, 25], maxZoom: 14, animate: true, duration: 0.5 }
             );
           } catch (err) { /* ignore */ }
         }
