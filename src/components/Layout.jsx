@@ -7,6 +7,7 @@ import UploadModal from './UploadModal';
 import ExportModal from './ExportModal';
 import LayerSelectModal from './LayerSelectModal';
 import MyAccountModal from './MyAccountModal';
+import SupabaseSettingsModal, { SUPABASE_TARGET_STORAGE_KEY } from './SupabaseSettingsModal';
 import useCsvPoints from '../hooks/useCsvPoints';
 import useWfsPoints from '../hooks/useWfsPoints';
 import useAuth from '../hooks/useAuth';
@@ -138,15 +139,44 @@ const Layout = ({ isEmbed = false }) => {
   // database provider; useSupabasePoints refetches published data on change.
   // Optional URL override: ?supabaseUrl=...&supabaseAnonKey=... so the
   // standalone WebGIS can be pointed at local/cloud without hardcoding.
-  const [supabaseTarget, setSupabaseTarget] = useState(() => {
+  // A saved in-app setting (SupabaseSettingsModal) persists to localStorage.
+  const [supabaseTarget, setSupabaseTargetRaw] = useState(() => {
     if (typeof window !== 'undefined') {
+      // Priority: explicit URL query override > saved in-app setting > runtime
+      // /config.json > build-time env default
       const params = new URLSearchParams(window.location.search);
       const url = params.get('supabaseUrl') || '';
       const anonKey = params.get('supabaseAnonKey') || params.get('supabaseKey') || '';
       if (url) return { url, anonKey };
+      try {
+        const saved = window.localStorage.getItem(SUPABASE_TARGET_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.url) return { url: parsed.url, anonKey: parsed.anonKey || '' };
+        }
+      } catch (e) { /* ignore corrupt storage */ }
+      const runtime = window.__WEBGIS_RUNTIME_CONFIG__;
+      if (runtime && runtime.supabase && runtime.supabase.url) {
+        return { url: runtime.supabase.url, anonKey: runtime.supabase.anonKey || '' };
+      }
     }
     return null;
   });
+  // Persist in-app changes (mirrors setSupabaseTarget for message/URL updates too,
+  // but only stores when the value actually changes to avoid churn).
+  const setSupabaseTarget = React.useCallback((next) => {
+    setSupabaseTargetRaw(next);
+    try {
+      if (typeof window !== 'undefined') {
+        if (next && next.url) {
+          window.localStorage.setItem(SUPABASE_TARGET_STORAGE_KEY, JSON.stringify({ url: next.url, anonKey: next.anonKey || '' }));
+        } else {
+          window.localStorage.removeItem(SUPABASE_TARGET_STORAGE_KEY);
+        }
+      }
+    } catch (e) { /* ignore storage errors */ }
+  }, []);
+  const [isSupabaseSettingsOpen, setIsSupabaseSettingsOpen] = useState(false);
 
   // --- Playback State ---
   const [isPlaying, setIsPlaying] = useState(false);
@@ -794,10 +824,11 @@ const Layout = ({ isEmbed = false }) => {
         onOpenLayerSelect={() => setIsLayerSelectOpen(true)}
         isViewerOpen={isViewerOpen}
         setIsViewerOpen={setIsViewerOpen}
-        onOpenAccount={() => setIsAccountOpen(true)}
+onOpenAccount={() => setIsAccountOpen(true)}
         user={user}
         permissions={permissions}
         signOut={signOut}
+        onOpenSupabaseSettings={() => setIsSupabaseSettingsOpen(true)}
       />
 
       {/* Layer Selection Popup Modal before opening Attribute Table */}
@@ -1025,6 +1056,16 @@ const Layout = ({ isEmbed = false }) => {
         signOut={signOut}
         usageStats={usageStats}
         onResetStats={resetStats}
+      />
+
+      {/* Database Backend (local/cloud Supabase) Settings Modal */}
+      <SupabaseSettingsModal
+        isOpen={isSupabaseSettingsOpen}
+        onClose={() => setIsSupabaseSettingsOpen(false)}
+        currentTarget={supabaseTarget}
+        onApplyTarget={setSupabaseTarget}
+        defaultUrl={typeof window !== 'undefined' ? (import.meta.env.VITE_SUPABASE_URL || '') : ''}
+        defaultAnonKey={typeof window !== 'undefined' ? (import.meta.env.VITE_SUPABASE_ANON_KEY || '') : ''}
       />
     </div>
   );

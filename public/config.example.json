@@ -1,0 +1,6 @@
+{
+  "supabase": {
+    "url": "http://localhost:8000",
+    "anonKey": ""
+  }
+}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Upload, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight, LogOut, Sun, Moon, Search } from 'lucide-react';
+import { Layers, ChevronDown, Map as MapIcon, Menu, X, LayoutDashboard, User, HelpCircle, Info, Ruler, PenTool, MousePointer2, Upload, Download, Trash2, MoreVertical, Calendar, Grid, Hexagon, Circle, Crosshair, Table, PanelRightClose, PanelRightOpen, Wrench, ChevronRight, LogOut, Sun, Moon, Search, Database } from 'lucide-react';
 import clsx from 'clsx';
 import { BASEMAPS } from '../config/basemaps';
 import { useTheme } from '../context/ThemeContext';
@@ -15,7 +15,7 @@ const MenuLink = ({ icon: Icon, label, active, onClick }) => (
   </button>
 );
 
-const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut, permissions = {} }) => {
+const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers, setActiveLayers, activeBasemap, setActiveBasemap, activeTool, setActiveTool, filterSubgrid, setFilterSubgrid, availableSubgrids = [], filterDate, setFilterDate, filterColorByDate, setFilterColorByDate, filterDateStrict, setFilterDateStrict, onZoomToTrack, isTableOpen, setIsTableOpen, onOpenLayerSelect, isViewerOpen, setIsViewerOpen, onOpenAccount, user, signOut, permissions = {}, onOpenSupabaseSettings }) => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isBasemapOpen, setIsBasemapOpen] = useState(false);
   const [isToolboxOpen, setIsToolboxOpen] = useState(false);
@@ -653,6 +653,11 @@ const Sidebar = ({ isEmbed = false, isOpen, setIsOpen, qgisWmsUrl, activeLayers,
                   icon={User}
                   label="My Account"
                   onClick={() => { setIsDrawerOpen(false); onOpenAccount && onOpenAccount(); }}
+                />
+                <MenuLink
+                  icon={Database}
+                  label="Database Backend"
+                  onClick={() => { setIsDrawerOpen(false); onOpenSupabaseSettings && onOpenSupabaseSettings(); }}
                 />
                 <MenuLink icon={HelpCircle} label="Help & Support" />
               </div>
