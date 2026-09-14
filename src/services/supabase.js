@@ -114,7 +114,10 @@ function buildSafeSupabaseFetch(supabaseUrl, supabaseAnonKey) {
  */
 export function createSupabaseClient(url = DEFAULT_SUPABASE_URL, anonKey = DEFAULT_SUPABASE_ANON_KEY) {
   const supabaseUrl = url || DEFAULT_SUPABASE_URL;
-  const supabaseAnonKey = anonKey || DEFAULT_SUPABASE_ANON_KEY;
+  // Only fall back to the build-time anon key when the URL is also the build-time
+  // target. A custom URL (e.g. local Supabase) with a cloud key would silently
+  // 401 on every query — better to use the caller's key verbatim.
+  const supabaseAnonKey = anonKey || (supabaseUrl === DEFAULT_SUPABASE_URL ? DEFAULT_SUPABASE_ANON_KEY : '');
 
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {

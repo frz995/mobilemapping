@@ -74,6 +74,12 @@ export function useSupabasePoints(target) {
                         });
                     } else if (tableError) {
                         console.error('[useSupabasePoints] panoramas table fallback error:', tableError.message);
+                        // Surface the failure so the UI can tell the user WHY the map
+                        // is empty (e.g. wrong backend URL or anon key).
+                        setError(tableError.message);
+                    } else if (!viewError) {
+                        // Both queries returned empty — no published data in this backend.
+                        setPoints([]);
                     }
                 }
 
@@ -92,7 +98,9 @@ export function useSupabasePoints(target) {
 
                 if (!sourceData || sourceData.length === 0) {
                     setPoints([]);
+                    setError(null);
                 } else {
+                    setError(null);
                     const formattedPoints = sourceData.map(item => {
                         const rawSubgrid = item.subgrid || extractSubgrid(item.filename || item.image_url || item.description);
                         const cleanFn = (item.filename || '').replace(/^\/+/, '').replace(/^MMS_PIC\//i, '');

@@ -82,8 +82,10 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
     }
     setTesting(true);
     setStatus(null);
-    // Privacy: never send the stored key unless the user typed one now.
-    const testKey = keyDirty ? anonKey.trim() : '';
+    // Use the typed key if provided; otherwise test with the stored key (never
+    // displayed). With no key at all the request 401s — which still proves the
+    // server is reachable, but flags the missing credential.
+    const testKey = (keyDirty && anonKey.trim()) ? anonKey.trim() : (currentTarget?.anonKey || '');
     try {
       const res = await fetch(`${trimmedUrl}/rest/v1/`, {
         headers: {
@@ -94,7 +96,11 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
       // Any HTTP response means the server is reachable. 401/403 are EXPECTED
       // for the REST root with a scoped anon key — auth is enforced per-table,
       // not at the root, so treat them as "reachable".
-      setStatus({ kind: 'ok', text: `Reachable! Server responded ${res.status}.` });
+      if (!testKey && (res.status === 401 || res.status === 403)) {
+        setStatus({ kind: 'err', text: `Server reachable (${res.status}) but no anon key set — open the key field and save it first.` });
+      } else {
+        setStatus({ kind: 'ok', text: `Reachable! Server responded ${res.status}.` });
+      }
     } catch (err) {
       setStatus({ kind: 'err', text: `Connection failed: ${(err?.message || err).slice(0, 120)}` });
     } finally {
