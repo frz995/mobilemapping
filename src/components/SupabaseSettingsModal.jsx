@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  X, Database, Server, KeyRound, Save, RotateCcw, CheckCircle, AlertCircle, Loader2, ExternalLink
+  X, Database, Server, KeyRound, Save, RotateCcw, CheckCircle, AlertCircle, Loader2, Plug
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import clsx from 'clsx';
@@ -22,6 +22,7 @@ const Input = ({ icon: Icon, label, value, onChange, placeholder, type = 'text',
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       spellCheck={false}
+      autoComplete="off"
       className={clsx(
         "w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 transition-all",
         isDark
@@ -32,17 +33,20 @@ const Input = ({ icon: Icon, label, value, onChange, placeholder, type = 'text',
   </label>
 );
 
-const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, defaultUrl = '', defaultAnonKey = '' }) => {
+const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, defaultUrl = '' }) => {
   const { isDark } = useTheme();
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
-  const [status, setStatus] = useState(null); // { kind: 'ok'|'err'|'saving', text }
+  const [keyDirty, setKeyDirty] = useState(false); // user typed a new key
+  const [status, setStatus] = useState(null); // { kind: 'ok'|'err', text }
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      // Privacy: never prefill the stored anon key — show a masked marker only.
       setUrl(currentTarget?.url || '');
-      setAnonKey(currentTarget?.anonKey || '');
+      setAnonKey('');
+      setKeyDirty(false);
       setStatus(null);
     }
   }, [isOpen, currentTarget]);
@@ -53,18 +57,21 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
     const trimmedUrl = url.trim().replace(/\/+$/, '');
     if (!trimmedUrl) {
       onApplyTarget(null);
-      setStatus({ kind: 'ok', text: 'Using default (build-time env) backend.' });
+      setStatus({ kind: 'ok', text: 'Using default backend.' });
       return;
     }
-    onApplyTarget({ url: trimmedUrl, anonKey: anonKey.trim() });
+    // If the key box was left empty, keep whatever key is already stored.
+    const nextKey = (keyDirty && anonKey.trim()) ? anonKey.trim() : (currentTarget?.anonKey || '');
+    onApplyTarget({ url: trimmedUrl, anonKey: nextKey });
     setStatus({ kind: 'ok', text: 'Backend saved. Reloading map data…' });
   };
 
   const resetToDefault = () => {
     setUrl(defaultUrl || '');
-    setAnonKey(defaultAnonKey || '');
+    setAnonKey('');
+    setKeyDirty(false);
     onApplyTarget(null);
-    setStatus({ kind: 'ok', text: 'Reset to default (build-time env) backend.' });
+    setStatus({ kind: 'ok', text: 'Reset to default backend.' });
   };
 
   const testConnection = async () => {
@@ -75,18 +82,19 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
     }
     setTesting(true);
     setStatus(null);
+    // Privacy: never send the stored key unless the user typed one now.
+    const testKey = keyDirty ? anonKey.trim() : '';
     try {
       const res = await fetch(`${trimmedUrl}/rest/v1/`, {
         headers: {
-          apikey: anonKey.trim(),
-          Authorization: `Bearer ${anonKey.trim()}`
+          apikey: testKey,
+          Authorization: `Bearer ${testKey}`
         }
       });
-      if (res.ok || res.status === 404 || res.status === 406) {
-        setStatus({ kind: 'ok', text: `Connected! Server responded ${res.status}.` });
-      } else {
-        setStatus({ kind: 'err', text: `Server responded ${res.status}: ${(res.statusText || 'unexpected response').slice(0, 80)}.` });
-      }
+      // Any HTTP response means the server is reachable. 401/403 are EXPECTED
+      // for the REST root with a scoped anon key — auth is enforced per-table,
+      // not at the root, so treat them as "reachable".
+      setStatus({ kind: 'ok', text: `Reachable! Server responded ${res.status}.` });
     } catch (err) {
       setStatus({ kind: 'err', text: `Connection failed: ${(err?.message || err).slice(0, 120)}` });
     } finally {
@@ -95,6 +103,7 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
   };
 
   const usingCustom = Boolean(currentTarget?.url);
+  const hasStoredKey = Boolean(currentTarget?.anonKey);
 
   return (
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
@@ -135,13 +144,21 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
 
         {/* Body */}
         <div className="px-5 py-5 space-y-4">
-          {usingCustom && (
+          {usingCustom ? (
             <div className={clsx(
               "flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold",
               isDark ? "bg-emerald-950/50 text-emerald-400 border border-emerald-800/50" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
             )}>
               <CheckCircle size={14} />
-              Currently using a custom backend. Published data loads from it.
+              Custom backend active{currentTarget?.url ? `: ${currentTarget.url}` : ''}.
+            </div>
+          ) : (
+            <div className={clsx(
+              "flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold",
+              isDark ? "bg-slate-800/60 text-slate-400 border border-slate-700/60" : "bg-gray-50 text-gray-500 border border-gray-200"
+            )}>
+              <CheckCircle size={14} />
+              Using default backend.
             </div>
           )}
 
@@ -150,18 +167,33 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
             label="Supabase URL"
             value={url}
             onChange={setUrl}
-            placeholder={defaultUrl || 'https://YOUR-PROJECT.supabase.co'}
+            placeholder="https://YOUR-PROJECT.supabase.co"
             isDark={isDark}
           />
 
-          <Input
-            icon={KeyRound}
-            label="Anon Key (optional)"
-            value={anonKey}
-            onChange={setAnonKey}
-            placeholder={defaultAnonKey ? 'Uses build-time anon key' : 'Paste your anon / publishable key'}
-            isDark={isDark}
-          />
+          {keyDirty || anonKey ? (
+            <Input
+              icon={KeyRound}
+              label="Anon Key"
+              value={anonKey}
+              onChange={(v) => { setAnonKey(v); setKeyDirty(true); }}
+              placeholder="Paste your anon / publishable key"
+              type="password"
+              isDark={isDark}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setKeyDirty(true); setAnonKey(''); }}
+              className={clsx(
+                "flex w-full items-center gap-2 rounded-xl border border-dashed px-3 py-2.5 text-xs font-semibold transition-all",
+                isDark ? "border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200" : "border-gray-300 text-gray-500 hover:border-gray-400 hover:text-gray-700"
+              )}
+            >
+              <KeyRound size={14} />
+              {hasStoredKey ? 'Replace stored anon key…' : 'Set anon key (optional)…'}
+            </button>
+          )}
 
           {/* Buttons */}
           <div className="flex items-center gap-2 pt-1">
@@ -175,7 +207,7 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
                   : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-white hover:shadow"
               )}
             >
-              {testing ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+              {testing ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />}
               Test Connection
             </button>
             <button
@@ -190,7 +222,7 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
             </button>
             <button
               onClick={resetToDefault}
-              title="Use build-time env defaults"
+              title="Use default backend"
               className={clsx(
                 "p-2.5 rounded-xl border transition-all",
                 isDark ? "border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-800" : "border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-50"
@@ -219,21 +251,17 @@ const SupabaseSettingsModal = ({ isOpen, onClose, currentTarget, onApplyTarget, 
           "px-5 py-3 border-t flex items-center gap-1.5",
           isDark ? "border-slate-800 text-slate-500" : "border-gray-100 text-gray-400"
         )}>
-          <InfoIcon isDark={isDark} />
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4M12 8h.01" />
+          </svg>
           <span className="text-[10px] font-medium">
-            Saved in this browser only. The Dashboard can override this via SET_SUPABASE_TARGET when embedded.
+            Saved in this browser only. Leave the key empty to keep the stored one.
           </span>
         </div>
       </div>
     </div>
   );
 };
-
-const InfoIcon = ({ isDark }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-    <circle cx="12" cy="12" r="10" />
-    <path d="M12 16v-4M12 8h.01" />
-  </svg>
-);
 
 export default SupabaseSettingsModal;

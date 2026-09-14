@@ -1065,7 +1065,6 @@ onOpenAccount={() => setIsAccountOpen(true)}
         currentTarget={supabaseTarget}
         onApplyTarget={setSupabaseTarget}
         defaultUrl={typeof window !== 'undefined' ? (import.meta.env.VITE_SUPABASE_URL || '') : ''}
-        defaultAnonKey={typeof window !== 'undefined' ? (import.meta.env.VITE_SUPABASE_ANON_KEY || '') : ''}
       />
     </div>
   );
