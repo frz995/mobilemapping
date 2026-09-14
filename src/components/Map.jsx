@@ -854,6 +854,11 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     });
 
     map.on('moveend', () => {
+      // Camera flights (jumpTo-per-frame) fire moveend every animation frame;
+      // reporting those to React causes a 60fps re-render storm on the parent
+      // (Dashboard + standalone) that fought the flight and glitched wheel
+      // zooming. Only sync viewport state after deliberate, user-driven moves.
+      if (flightActiveRef.current) return;
       const c = map.getCenter();
       if (onMapMoved) onMapMoved([c.lat, c.lng], map.getZoom());
     });
@@ -1232,6 +1237,9 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
   const flightRafRef = useRef(null);
   const flightGenRef = useRef(0);
   const flightLoadCbRef = useRef(null);
+  // True while a camera flight is mid-air; moveend reporting to React is
+  // suppressed for that window (jumpTo fires moveend every frame).
+  const flightActiveRef = useRef(false);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1248,6 +1256,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         map.off('load', flightLoadCbRef.current);
         flightLoadCbRef.current = null;
       }
+      flightActiveRef.current = false;
     };
     stopFlight();
 
@@ -1283,6 +1292,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       }
 
       const t0 = performance.now();
+      flightActiveRef.current = true;
       const step = (now) => {
         if (gen !== flightGenRef.current) return; // superseded mid-flight
         const t = Math.min(1, Math.max(0, (now - t0) / duration));
@@ -1296,6 +1306,10 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
           flightRafRef.current = requestAnimationFrame(step);
         } else {
           flightRafRef.current = null;
+          // Flush the landed viewport to the parent exactly once.
+          flightActiveRef.current = false;
+          const c = map.getCenter();
+          if (onMapMoved) onMapMoved([c.lat, c.lng], map.getZoom());
           if (!pitch3D) {
             try { map.setTerrain(null); } catch (err) { console.warn('Terrain remove warning:', err); }
           }
@@ -1404,22 +1418,34 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     const map = mapRef.current;
     if (!map) return;
 
+    // Runs on every camera-yaw batch (60fps). Deliberately lightweight and
+    // non-stacking: earlier this re-ran map.resize() and registered stacked
+    // once('load'/'idle') listeners on every re-render, so idle callbacks kept
+    // firing resize+repaint forever — which visibly glitched wheel zooming.
+    // Real container resizes are already handled by the ResizeObserver below
+    // the init effect, and the boundary overlay re-applies itself.
+    let loadCb = null;
+    let disposed = false;
+
     const runSync = () => {
-      map.resize();
+      if (disposed) return;
       update3DSonar();
-      // Re-apply boundary overlay if it got dropped by the resize/selection
       try {
         if (applyBoundaryRef.current) applyBoundaryRef.current();
       } catch (err) { /* ignore */ }
-      map.triggerRepaint();
     };
 
     if (map.isStyleLoaded()) {
       runSync();
     } else {
+      loadCb = runSync;
       map.once('load', runSync);
-      map.once('idle', runSync);
     }
+
+    return () => {
+      disposed = true;
+      if (loadCb) map.off('load', loadCb);
+    };
   }, [update3DSonar]);
 
   return <div ref={containerRef} className="w-full h-full" />;
