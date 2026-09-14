@@ -3,8 +3,28 @@ import { supabase, createSupabaseClient } from '../services/supabase';
 
 function extractSubgrid(text) {
     if (!text) return '';
-    const match = String(text).match(/Nd{2,3}Ed{2,3}/i);
+    const match = String(text).match(/N\d{2,3}E\d{2,3}/i);
     return match ? match[0].toUpperCase() : '';
+}
+
+/**
+ * Normalise a row's coordinates. Both `panoramas` and `panoramas_view` store
+ * the position in the PostGIS `geom` GeoJSON column (the view exposes NO
+ * longitude/latitude columns), so the lon/lat pair must always be extracted
+ * from geom.coordinates or the legacy longitude/lon/coordinates fields.
+ */
+function extractRowCoords(row) {
+    let lon = row.longitude ?? row.lon;
+    let lat = row.latitude ?? row.lat;
+    if ((lon == null || lat == null) && Array.isArray(row.coordinates) && row.coordinates.length >= 2) {
+        lon = row.coordinates[0];
+        lat = row.coordinates[1];
+    }
+    if ((lon == null || lat == null) && Array.isArray(row.geom?.coordinates) && row.geom.coordinates.length >= 2) {
+        lon = row.geom.coordinates[0];
+        lat = row.geom.coordinates[1];
+    }
+    return { ...row, longitude: lon, latitude: lat, lon, lat };
 }
 
 /**
@@ -43,7 +63,10 @@ export function useSupabasePoints(target) {
                     .order('filename', { ascending: true });
 
                 if (!viewError && Array.isArray(viewData) && viewData.length > 0) {
-                    sourceData = viewData;
+                    // The view exposes geom GeoJSON only — extract lon/lat for every row
+                    // (previously only the fallback path did this, so view rows rendered
+                    // with NaN coords and never appeared on the map).
+                    sourceData = viewData.map(extractRowCoords);
                 } else {
                     if (viewError) console.warn('[useSupabasePoints] panoramas_view notice:', viewError.message);
                     // 2. Resilient Fallback: direct query to panoramas table
@@ -54,24 +77,7 @@ export function useSupabasePoints(target) {
 
                     if (!tableError && Array.isArray(tableData) && tableData.length > 0) {
                         console.info('[useSupabasePoints] Successfully retrieved points from fallback panoramas table. Count:', tableData.length);
-                        sourceData = tableData.map(row => {
-                            let lon = row.longitude ?? row.lon;
-                            let lat = row.latitude ?? row.lat;
-                            if ((lon == null || lat == null) && Array.isArray(row.coordinates) && row.coordinates.length >= 2) {
-                                lon = row.coordinates[0];
-                                lat = row.coordinates[1];
-                            } else if ((lon == null || lat == null) && row.geom?.coordinates && Array.isArray(row.geom.coordinates)) {
-                                lon = row.geom.coordinates[0];
-                                lat = row.geom.coordinates[1];
-                            }
-                            return {
-                                ...row,
-                                longitude: lon,
-                                latitude: lat,
-                                lon,
-                                lat
-                            };
-                        });
+                        sourceData = tableData.map(extractRowCoords);
                     } else if (tableError) {
                         console.error('[useSupabasePoints] panoramas table fallback error:', tableError.message);
                         // Surface the failure so the UI can tell the user WHY the map
