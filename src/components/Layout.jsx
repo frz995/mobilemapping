@@ -133,6 +133,21 @@ const Layout = ({ isEmbed = false }) => {
   // standalone published-only query from useSupabasePoints.
   const [parentPoints, setParentPoints] = useState(null);
 
+  // Dynamically switchable Supabase backend (local / cloud). The Dashboard
+  // posts SET_SUPABASE_TARGET { url, anonKey } when the user switches the
+  // database provider; useSupabasePoints refetches published data on change.
+  // Optional URL override: ?supabaseUrl=...&supabaseAnonKey=... so the
+  // standalone WebGIS can be pointed at local/cloud without hardcoding.
+  const [supabaseTarget, setSupabaseTarget] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const url = params.get('supabaseUrl') || '';
+      const anonKey = params.get('supabaseAnonKey') || params.get('supabaseKey') || '';
+      if (url) return { url, anonKey };
+    }
+    return null;
+  });
+
   // --- Playback State ---
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1000); // ms per frame
@@ -159,6 +174,13 @@ const Layout = ({ isEmbed = false }) => {
             supabaseUrl: event.data.storage.supabaseUrl || prev.supabaseUrl || '',
             supabaseBucket: event.data.storage.supabaseBucket || prev.supabaseBucket || 'MMS_PIC'
           }));
+        }
+      } else if (event.data.type === 'SET_SUPABASE_TARGET') {
+        const url = event.data.url || '';
+        const anonKey = event.data.anonKey || '';
+        if (url) {
+          console.log('[Layout] SET_SUPABASE_TARGET ->', url);
+          setSupabaseTarget({ url, anonKey });
         }
       } else if (event.data.type === 'SET_MAP_VIEW_STATE') {
         const sub = event.data.subgrid || '';
@@ -236,7 +258,7 @@ const Layout = ({ isEmbed = false }) => {
   const qgisWmsUrl = import.meta.env.VITE_QGIS_WMS_URL || undefined;
 
   // Fetch data directly from Supabase
-  const { points, loading: pointsLoading, error: pointsError } = useSupabasePoints();
+  const { points, loading: pointsLoading, error: pointsError } = useSupabasePoints(supabaseTarget);
 
   // Show error toast/notification if data fetching fails
   useEffect(() => {

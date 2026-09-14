@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '../services/supabase';
+import { useState, useEffect, useMemo } from 'react';
+import { supabase, createSupabaseClient } from '../services/supabase';
 
 function extractSubgrid(text) {
     if (!text) return '';
@@ -7,10 +7,27 @@ function extractSubgrid(text) {
     return match ? match[0].toUpperCase() : '';
 }
 
-export function useSupabasePoints() {
+/**
+ * Fetch published panorama points from Supabase.
+ *
+ * Accepts an optional dynamic target ({ url, anonKey }) so the standalone
+ * WebGIS can hot-switch between local / cloud Supabase backends
+ * (SET_SUPABASE_TARGET). When the target changes the client is rebuilt and
+ * the data refetched automatically.
+ */
+export function useSupabasePoints(target) {
     const [points, setPoints] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    const client = useMemo(() => {
+        if (target && target.url) {
+            return createSupabaseClient(target.url, target.anonKey);
+        }
+        return supabase;
+    }, [target && target.url, target && target.anonKey]);
+
+    const targetKey = target && target.url ? `${target.url}|${target.anonKey || ''}` : 'default';
 
     useEffect(() => {
         async function fetchPoints() {
@@ -20,7 +37,7 @@ export function useSupabasePoints() {
                 let sourceData = [];
 
                 // 1. Primary query: panoramas_view
-                const { data: viewData, error: viewError } = await supabase
+                const { data: viewData, error: viewError } = await client
                     .from('panoramas_view')
                     .select('*')
                     .order('filename', { ascending: true });
@@ -30,7 +47,7 @@ export function useSupabasePoints() {
                 } else {
                     if (viewError) console.warn('[useSupabasePoints] panoramas_view notice:', viewError.message);
                     // 2. Resilient Fallback: direct query to panoramas table
-                    const { data: tableData, error: tableError } = await supabase
+                    const { data: tableData, error: tableError } = await client
                         .from('panoramas')
                         .select('*')
                         .order('filename', { ascending: true });
@@ -62,7 +79,7 @@ export function useSupabasePoints() {
 
                 let qaMap = new Map();
                 try {
-                    const { data: qaData } = await supabase.from('qa_defects').select('*');
+                    const { data: qaData } = await client.from('qa_defects').select('*');
                     if (qaData && qaData.length > 0) {
                         qaData.forEach(q => {
                             const k = (q.item_key || q.filename || '').replace(/^.*[\\\/]/, '').toUpperCase();
@@ -182,7 +199,7 @@ export function useSupabasePoints() {
         }
 
         fetchPoints();
-    }, []);
+    }, [client, targetKey]);
 
     return { points, loading, error };
 }

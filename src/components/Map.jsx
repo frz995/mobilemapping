@@ -993,68 +993,101 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         const hoverColor = isDarkBasemap ? '#38bdf8' : '#1e40af';
 
         const hasBoundary = Boolean(boundaryGeojson && Array.isArray(boundaryGeojson.features) && boundaryGeojson.features.length > 0);
+        const emptyFC = { type: 'FeatureCollection', features: [] };
+        const src = 'project-boundary';
+        const dimSrc = 'project-boundary-dim-src';
 
-        // Remove layers first each pass (cheap, idempotent)
-        ['project-boundary-dim', 'project-boundary-line-hover', 'project-boundary-line', 'project-boundary-fill'].forEach((lid) => {
-          if (map.getLayer(lid)) map.removeLayer(lid);
-        });
-        if (map.getSource('project-boundary')) map.removeSource('project-boundary');
-        if (map.getSource('project-boundary-dim-src')) map.removeSource('project-boundary-dim-src');
-
-        if (!hasBoundary) return;
-
-        // Add GeoJSON source
-        map.addSource('project-boundary', {
-          type: 'geojson',
-          data: boundaryGeojson
-        });
+        // Add-once + setData (never tear down). Repeated passes (basemap/theme
+        // change, camera idle, focus fits) must NOT remove/re-add this source —
+        // removing a source while a layer still references it throws, which used
+        // to flicker or fully lose the boundary on every effect re-run.
+        if (map.getSource(src)) {
+          map.getSource(src).setData(hasBoundary ? boundaryGeojson : emptyFC);
+        } else {
+          map.addSource(src, { type: 'geojson', data: hasBoundary ? boundaryGeojson : emptyFC });
+        }
+        if (!map.getSource(dimSrc)) {
+          map.addSource(dimSrc, { type: 'geojson', data: emptyFC });
+        }
 
         // District polygon (stroke/outline only, no fill color)
-        map.addLayer({
-          id: 'project-boundary-fill',
-          type: 'fill',
-          source: 'project-boundary',
-          paint: {
-            'fill-color': 'transparent',
-            'fill-opacity': 0
-          }
-        });
+        if (!map.getLayer('project-boundary-fill')) {
+          map.addLayer({
+            id: 'project-boundary-fill',
+            type: 'fill',
+            source: src,
+            paint: {
+              'fill-color': 'transparent',
+              'fill-opacity': 0
+            }
+          });
+        }
 
-        // Border layer (stroke)
-        map.addLayer({
-          id: 'project-boundary-line',
-          type: 'line',
-          source: 'project-boundary',
-          paint: {
-            'line-color': lineColor,
-            'line-width': 2.5,
-            'line-opacity': 1,
-            'line-blur': 0.2
-          }
-        });
+        // Border layer (stroke) — recolor live so basemap/theme changes apply without a rebuild
+        if (!map.getLayer('project-boundary-line')) {
+          map.addLayer({
+            id: 'project-boundary-line',
+            type: 'line',
+            source: src,
+            paint: {
+              'line-color': lineColor,
+              'line-width': 2.5,
+              'line-opacity': hasBoundary ? 1 : 0,
+              'line-blur': 0.2
+            }
+          });
+        } else {
+          map.setPaintProperty('project-boundary-line', 'line-color', lineColor);
+          map.setPaintProperty('project-boundary-line', 'line-opacity', hasBoundary ? 1 : 0);
+        }
 
         // Hover effect line (invisible until hover; brightens & thickens border)
-        map.addLayer({
-          id: 'project-boundary-line-hover',
-          type: 'line',
-          source: 'project-boundary',
-          paint: {
-            'line-color': hoverColor,
-            'line-width': 6,
-            'line-opacity': 0.9,
-            'line-blur': 0.5
-          },
-          layout: { visibility: 'none' }
-        });
+        if (!map.getLayer('project-boundary-line-hover')) {
+          map.addLayer({
+            id: 'project-boundary-line-hover',
+            type: 'line',
+            source: src,
+            paint: {
+              'line-color': hoverColor,
+              'line-width': 6,
+              'line-opacity': 0.9,
+              'line-blur': 0.5
+            },
+            layout: { visibility: 'none' }
+          });
+        } else {
+          map.setPaintProperty('project-boundary-line-hover', 'line-color', hoverColor);
+        }
+        map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'none');
 
-        map.on('mouseenter', 'project-boundary-line', () => {
-          map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'visible');
-          map.getCanvas().style.cursor = 'pointer';
-        });
-        map.on('mouseleave', 'project-boundary-line', () => {
-          map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'none');
-          map.getCanvas().style.cursor = '';
-        });
+        // Outside-dim mask layer: always exists (empty geometry placeholder) so
+        // `ensureBoundary`'s dimMissing check can never force a rebuild on idle.
+        if (!map.getLayer('project-boundary-dim')) {
+          map.addLayer({
+            id: 'project-boundary-dim',
+            type: 'fill',
+            source: dimSrc,
+            paint: {
+              'fill-color': '#020617',
+              'fill-opacity': boundaryDimActive ? 0.4 : 0
+            }
+          });
+        } else {
+          map.setPaintProperty('project-boundary-dim', 'fill-opacity', boundaryDimActive ? 0.4 : 0);
+        }
+
+        // Bind hover listeners once per map instance — never re-registered on re-passes
+        if (!map.__projectBoundaryHoverBound) {
+          map.__projectBoundaryHoverBound = true;
+          map.on('mouseenter', 'project-boundary-line', () => {
+            map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'visible');
+            map.getCanvas().style.cursor = 'pointer';
+          });
+          map.on('mouseleave', 'project-boundary-line', () => {
+            map.setLayoutProperty('project-boundary-line-hover', 'visibility', 'none');
+            map.getCanvas().style.cursor = '';
+          });
+        }
       } catch (err) {
         // Non-fatal boundary render error
       }
@@ -1086,7 +1119,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       map.off('moveend', ensureBoundary);
       map.off('idle', ensureBoundary);
       try {
-        ['project-boundary-dim', 'project-boundary-line-hover', 'project-boundary-line'].forEach((lid) => {
+        ['project-boundary-fill', 'project-boundary-dim', 'project-boundary-line-hover', 'project-boundary-line'].forEach((lid) => {
           if (map.getLayer(lid)) map.removeLayer(lid);
         });
         if (map.getSource('project-boundary')) map.removeSource('project-boundary');
@@ -1189,12 +1222,27 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
   }, [basemap, overrideOpacity, getFormattedTileUrls]);
 
   // Apply / remove 3D perspective+terrain reactively when the 2D/3D mode toggles.
+  // Uses a zoom-coupled camera flight (Google / Tesla swoop): pitch and zoom
+  // are animated together so the ground footprint stays constant — the camera
+  // physically descends into the 3D surface and ascends back to flat 2D.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    let flightRaf = null;
+
+    const clampCos = (deg) => Math.cos(Math.min(deg, 72) * Math.PI / 180);
 
     const apply3D = () => {
+      const startPitch = map.getPitch();
+      const startBearing = map.getBearing();
+      const startZoom = map.getZoom();
+      const targetPitch = pitch3D ? 62 : 0;
+      const targetBearing = pitch3D ? -15 : 0;
+      const duration = 1800;
+      const baseline = startZoom + Math.log2(clampCos(startPitch));
+
       if (pitch3D) {
+        // Add terrain eagerly before the flight so it's visible as we tilt
         if (!map.getSource('terrain-dem')) {
           map.addSource('terrain-dem', {
             type: 'raster-dem',
@@ -1209,40 +1257,27 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         } catch (err) {
           console.warn('Terrain apply warning:', err);
         }
-        try {
-          // Google Maps / Tesla style cinematic fly: pitch up + subtle rotate,
-          // smoothstep easing so the camera accelerates in then settles.
-          map.easeTo({
-            pitch: 62,
-            bearing: -15,
-            duration: 1800,
-            easing: (t) => t * t * (3 - 2 * t),
-            essential: true
-          });
-        } catch (err) {
-          map.setPitch(62);
-          map.setBearing(-15);
-        }
-      } else {
-        try {
-          map.setTerrain(null);
-        } catch (err) {
-          console.warn('Terrain remove warning:', err);
-        }
-        try {
-          map.easeTo({
-            pitch: 0,
-            bearing: 0,
-            duration: 1800,
-            easing: (t) => t * t * (3 - 2 * t),
-            essential: true
-          });
-        } catch (err) {
-          map.setPitch(0);
-          map.setBearing(0);
-        }
       }
-      map.triggerRepaint();
+
+      const t0 = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, Math.max(0, (now - t0) / duration));
+        const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const pitch = startPitch + (targetPitch - startPitch) * e;
+        const bearing = startBearing + (targetBearing - startBearing) * e;
+        const zoom = Math.max(2.5, baseline - Math.log2(clampCos(pitch)));
+        map.jumpTo({ pitch, zoom, bearing });
+
+        if (t < 1) {
+          flightRaf = requestAnimationFrame(step);
+        } else {
+          flightRaf = null;
+          if (!pitch3D) {
+            try { map.setTerrain(null); } catch (err) { console.warn('Terrain remove warning:', err); }
+          }
+        }
+      };
+      flightRaf = requestAnimationFrame(step);
     };
 
     if (map.isStyleLoaded()) {
@@ -1250,6 +1285,10 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     } else {
       map.once('load', apply3D);
     }
+
+    return () => {
+      if (flightRaf !== null) cancelAnimationFrame(flightRaf);
+    };
   }, [pitch3D, basemap]);
 
   // Synchronize 3D Sonar directly to Selected Point Coordinates
@@ -1386,6 +1425,13 @@ const MapComponent = ({
   const { isDark } = useTheme();
   const [mapInstance, setMapInstance] = useState(null);
   const [is3D, setIs3D] = useState(false);
+
+  // Notify the parent (Dashboard) whenever the 3D view mode changes, so an
+  // external 2D/3D toggle stays in sync even when the in-map switch is used.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.parent === window) return;
+    window.parent.postMessage({ type: 'VIEW_MODE_CHANGED', mode: is3D ? '3D' : '2D' }, '*');
+  }, [is3D]);
   const [currentZoom, setCurrentZoom] = useState(INITIAL_ZOOM);
   const [mapCenter, setMapCenter] = useState(INITIAL_CENTER);
   const isDashboard = isEmbed || new URLSearchParams(window.location.search).has('dashboard') || (window.self !== window.top);
@@ -1661,6 +1707,11 @@ const MapComponent = ({
         setBoundaryDimActive(false);
       } else if (e.data?.type === 'DIM_OUTSIDE_BOUNDARY') {
         setBoundaryDimActive(Boolean(e.data.enabled));
+      } else if (e.data?.type === 'SET_VIEW_MODE') {
+        const mode = String(e.data.mode || '').toUpperCase();
+        if (mode === '3D' || mode === '2D') {
+          setIs3D(mode === '3D');
+        }
       }
     };
     window.addEventListener('message', handleMessage);
@@ -2060,10 +2111,10 @@ const MapComponent = ({
         <WebGL3DView
           // Remount a fresh MapLibre map whenever the selected basemap layer
           // changes (vector style URLs can't be swapped in-place; only raster
-          // tiles can via the reactive raster update effect). Also remount on
-          // 2D/3D toggle so the map always initializes with the correct pitch
-          // and terrain, guaranteeing a clean return to the flat 2D view.
-          key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}-${is3D ? '3d' : '2d'}`}
+          // tiles can via the reactive raster update effect). Keep the map
+          // persistent across 2D/3D toggles so the camera fly animation
+          // (pitch3D effect below) can animate a smooth continuous swoop.
+          key={`${basemap.id}-${overrideBasemap || ''}-${customTileUrl || ''}-${overrideOpacity ?? 1}`}
           center={mapCenter}
           zoom={currentZoom}
           basemap={basemap}
