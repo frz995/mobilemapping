@@ -38,6 +38,7 @@ const Viewer = forwardRef(({
   navTargets = [],
   onNavigate,
   selectedPoint,
+  canCalibrate = true,
   hideToolbox = false
 }, ref) => {
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
