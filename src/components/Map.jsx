@@ -1225,14 +1225,37 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
   // Uses a zoom-coupled camera flight (Google / Tesla swoop): pitch and zoom
   // are animated together so the ground footprint stays constant — the camera
   // physically descends into the 3D surface and ascends back to flat 2D.
+  // rAF id + generation token live in refs so a re-run (rapid 2D<->3D toggling
+  // or a defered 'load' start) always fully cancels any previous in-flight
+  // animation — overlapping flights used to fight each other and freeze
+  // ("stuck") halfway through the swoop.
+  const flightRafRef = useRef(null);
+  const flightGenRef = useRef(0);
+  const flightLoadCbRef = useRef(null);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    let flightRaf = null;
+
+    flightGenRef.current += 1;
+    const gen = flightGenRef.current;
+    const stopFlight = () => {
+      if (flightRafRef.current != null) {
+        cancelAnimationFrame(flightRafRef.current);
+        flightRafRef.current = null;
+      }
+      if (flightLoadCbRef.current) {
+        map.off('load', flightLoadCbRef.current);
+        flightLoadCbRef.current = null;
+      }
+    };
+    stopFlight();
 
     const clampCos = (deg) => Math.cos(Math.min(deg, 72) * Math.PI / 180);
 
     const apply3D = () => {
+      // A newer run superseded this one — never start a competing flight.
+      if (gen !== flightGenRef.current) return;
       const startPitch = map.getPitch();
       const startBearing = map.getBearing();
       const startZoom = map.getZoom();
@@ -1261,6 +1284,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
 
       const t0 = performance.now();
       const step = (now) => {
+        if (gen !== flightGenRef.current) return; // superseded mid-flight
         const t = Math.min(1, Math.max(0, (now - t0) / duration));
         const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
         const pitch = startPitch + (targetPitch - startPitch) * e;
@@ -1269,27 +1293,29 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         map.jumpTo({ pitch, zoom, bearing });
 
         if (t < 1) {
-          flightRaf = requestAnimationFrame(step);
+          flightRafRef.current = requestAnimationFrame(step);
         } else {
-          flightRaf = null;
+          flightRafRef.current = null;
           if (!pitch3D) {
             try { map.setTerrain(null); } catch (err) { console.warn('Terrain remove warning:', err); }
           }
         }
       };
-      flightRaf = requestAnimationFrame(step);
+      flightRafRef.current = requestAnimationFrame(step);
     };
 
     if (map.isStyleLoaded()) {
       apply3D();
     } else {
+      flightLoadCbRef.current = apply3D;
       map.once('load', apply3D);
     }
 
     return () => {
-      if (flightRaf !== null) cancelAnimationFrame(flightRaf);
+      flightGenRef.current += 1;
+      stopFlight();
     };
-  }, [pitch3D, basemap]);
+  }, [pitch3D]);
 
   // Synchronize 3D Sonar directly to Selected Point Coordinates
   const lastCenterCoordRef = useRef('');
