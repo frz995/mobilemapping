@@ -49,6 +49,13 @@ const Layout = ({ isEmbed = false }) => {
 
   // Record session start once on mount
   useEffect(() => { recordSessionStart(); }, []);
+  // Handshake: announce readiness to the embedding Dashboard. Its MapComponent
+  // listens for MAP_READY and re-runs syncMapSettings + sendStagedData — fixed
+  // deliveries (like the fingerprint-deduped project boundary) that were sent
+  // before this iframe's message listener attached used to be lost forever.
+  useEffect(() => {
+    try { window.parent?.postMessage({ type: 'MAP_READY' }, '*'); } catch (err) { /* ignore */ }
+  }, []);
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [viewState, setViewState] = useState({ yaw: 0, pitch: 0, hfov: 100 });
   const [sidebarOpen, setSidebarOpen] = useState(true);

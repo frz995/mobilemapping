@@ -183,6 +183,7 @@ const MapController = ({
   isEmbed,
   setMapInstance,
   setCurrentZoom,
+  introLockRef = null,
   onMapMoved
 }) => {
   const map = useMap();
@@ -227,6 +228,10 @@ const MapController = ({
 
 
   const lastBoundsKeyRef = useRef('');
+  const firstDataFitDoneRef = useRef(false);
+  // Pending stage-2 intro timer (2D) — cleared when the user takes manual
+  // camera control so the scheduled flight never overrides their scrolling.
+  const introStage2TimerRef = useRef(null);
 
   useEffect(() => {
     if (filteredPoints && filteredPoints.length > 0) {
@@ -252,7 +257,74 @@ const MapController = ({
           lastBoundsKeyRef.current = boundsKey;
           const bounds = L.latLngBounds(latlngs);
           if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+            const maxZoom = latlngs.length === 1 ? 16 : 17;
+            if (!firstDataFitDoneRef.current) {
+              // First fit after load/refresh: two-stage breathable choreography —
+              // show the project boundary extent first (when present), then ~2s
+              // later fly onto the panotrack extent. Later extent changes keep
+              // the regular quick fitBounds.
+              firstDataFitDoneRef.current = true;
+              const bFlat = [];
+              (boundaryGeojson?.features || []).forEach((f) => {
+                collectOuterRings(f.geometry).forEach((r) => bFlat.push(r));
+              });
+              const bCoords = bFlat.flat().filter((c) => Array.isArray(c) && c.length >= 2);
+              const schedule2DStage2 = () => {
+                if (introLockRef) introLockRef.current = true;
+                const releaseIntroLock = () => { if (introLockRef) introLockRef.current = false; };
+                const cancelStage2 = () => {
+                  if (introStage2TimerRef.current) {
+                    clearTimeout(introStage2TimerRef.current);
+                    introStage2TimerRef.current = null;
+                    console.log('[2D intro] stage 2 cancelled — user took camera control');
+                  }
+                  releaseIntroLock();
+                  map.stop();
+                  map.off('wheel', cancelStage2);
+                  map.off('mousedown', cancelStage2);
+                };
+                map.on('wheel', cancelStage2);
+                map.on('mousedown', cancelStage2);
+                introStage2TimerRef.current = setTimeout(() => {
+                  introStage2TimerRef.current = null;
+                  map.off('wheel', cancelStage2);
+                  map.off('mousedown', cancelStage2);
+                  // Stage 2 is starting — the intro now owns the last word;
+                  // explicit focus requests after this point are allowed.
+                  releaseIntroLock();
+                  try { map.stop(); } catch (err) { /* ignore */ }
+                  console.log('[2D intro] stage 2: fitting panotrack extent', { fromZoom: map.getZoom(), targetZoom: map.getBoundsZoom(bounds), maxZoom });
+                  // Relaxed, breathable dive onto the full panotrack extent:
+                  // slow glide with a long soft deceleration tail.
+                  map.flyToBounds(bounds, { padding: [60, 60], maxZoom, duration: 2.2, easeLinearity: 0.08 });
+                }, 2200);
+              };
+              if (bCoords.length > 0) {
+                const bLngs = bCoords.map((c) => c[0]);
+                const bLats = bCoords.map((c) => c[1]);
+                const boundaryBounds = L.latLngBounds([
+                  [Math.min(...bLats), Math.min(...bLngs)],
+                  [Math.max(...bLats), Math.max(...bLngs)]
+                ]);
+                if (boundaryBounds.isValid()) {
+                  console.log('[2D intro] stage 1: showing project boundary extent');
+                  map.flyToBounds(boundaryBounds, { padding: [25, 25], maxZoom: 12, duration: 1.4, easeLinearity: 0.12 });
+                  schedule2DStage2();
+                } else {
+                  console.log('[2D intro] stage 1: wide overview beat (invalid boundary)');
+                  map.flyToBounds(bounds, { padding: [200, 200], maxZoom: 9, duration: 1.4, easeLinearity: 0.12 });
+                  schedule2DStage2();
+                }
+              } else {
+                // No boundary (standalone WebGIS): a visible wide-overview
+                // beat first, then the dive onto the panotrack extent.
+                console.log('[2D intro] stage 1: wide overview beat (no boundary), then panotrack zoom');
+                map.flyToBounds(bounds, { padding: [200, 200], maxZoom: 9, duration: 1.2, easeLinearity: 0.2 });
+                schedule2DStage2();
+              }
+            } else {
+              map.fitBounds(bounds, { padding: [60, 60], maxZoom });
+            }
           }
         }
       }
@@ -291,6 +363,7 @@ const MapController = ({
     }
 
     const features = Array.isArray(boundaryGeojson?.features) ? boundaryGeojson.features : [];
+    console.log('[boundary:2D] effect', { hasBoundary: features.length > 0, features: features.length, focus: boundaryFocus, embed: isEmbed, styleReady: Boolean(map) });
     const rings = [];
     features.forEach((f) => {
       collectOuterRings(f.geometry).forEach((r) => {
@@ -331,7 +404,17 @@ const MapController = ({
 
     boundaryLayersRef.current = layers;
 
-    if (boundaryFocus || isEmbed || isDeletionMode) {
+    // Auto boundary framing must not fight the panotrack extent: when survey
+    // points are visible, the camera lands on the panotrack bounding box
+    // (explicit FOCUS_BOUNDARY actions still zoom to the boundary directly).
+    // Also never interrupt a pending intro stage-2 flight.
+    const hasPanoPoints = (filteredPoints || []).some((p) => {
+      const ln = parseFloat(p.lon ?? p.longitude ?? p.lng ?? p.x);
+      const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
+      return !isNaN(ln) && !isNaN(lt) && !(ln === 0 && lt === 0);
+    });
+    console.log('[boundary:2D] fit-gate', { pano: hasPanoPoints, autoFit: Boolean(boundaryFocus || isEmbed || isDeletionMode), introPending: Boolean(introStage2TimerRef.current) });
+    if ((boundaryFocus || isEmbed || isDeletionMode) && !hasPanoPoints && !introStage2TimerRef.current) {
       const bounds = rings.reduce((acc, ring) => {
         ring.forEach((pt) => acc.extend(pt));
         return acc;
@@ -587,7 +670,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
 };
 
 // --- WebGL 3D Terrain Viewport (MapLibre Engine) ---
-const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved, pitch3D = 0, boundaryGeojson = null, boundaryDimActive = false, boundaryFocus = false, noSonar = false }) => {
+  const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved, pitch3D = 0, boundaryGeojson = null, boundaryDimActive = false, boundaryFocus = false, noSonar = false, stagedDataVersion = 0 }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const sonarMarkerRef = useRef(null);
@@ -595,6 +678,13 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
   const pointsRef = useRef(points);
   const isIntroAnimatingRef = useRef(true);
   const lastDataFitKeyRef = useRef('');
+  // Set true the first time the load/refresh intro choreography (boundary
+  // extent first, then the panotrack extent zoom) runs; subsequent dataset
+  // updates use a plain quick fit instead.
+  const introChoreoDoneRef = useRef(false);
+  // Pending stage-2 timer id; cleared as soon as the user takes manual
+  // camera control (wheel zoom / drag) so intro flights never fight input.
+  const introChoreoTimerRef = useRef(null);
   const applyBoundaryRef = useRef(null);
   pointsRef.current = points;
 
@@ -606,7 +696,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     'satellite', 'esri_satellite', 'google-satellite', 'google-hybrid', 'usgs-imagery'
   ].includes(effectiveBasemapId);
 
-  // Robust Coordinate Extractor (Handles lat/lng, latitude/longitude, y/x, arrays)
+  // Robust Coordinate Extractor (Handles lat/lng, latitude/longitude, y/x, geom, coordinates, arrays)
   const getCoords = useCallback((pt) => {
     if (!pt) return null;
     if (Array.isArray(pt) && pt.length >= 2) {
@@ -614,10 +704,20 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       const lon = parseFloat(pt[1]);
       return (!isNaN(lat) && !isNaN(lon)) ? { lat, lon } : null;
     }
-    const lat = parseFloat(pt.lat ?? pt.latitude ?? pt.y);
-    const lon = parseFloat(pt.lon ?? pt.lng ?? pt.longitude ?? pt.x);
-    if (isNaN(lat) || isNaN(lon)) return null;
-    return { lat, lon };
+    let lat = pt.lat ?? pt.latitude ?? pt.y;
+    let lon = pt.lon ?? pt.lng ?? pt.longitude ?? pt.x;
+    if ((lat == null || lon == null || isNaN(lat) || isNaN(lon)) && Array.isArray(pt.coordinates) && pt.coordinates.length >= 2) {
+      lon = pt.coordinates[0];
+      lat = pt.coordinates[1];
+    }
+    if ((lat == null || lon == null || isNaN(lat) || isNaN(lon)) && Array.isArray(pt.geom?.coordinates) && pt.geom.coordinates.length >= 2) {
+      lon = pt.geom.coordinates[0];
+      lat = pt.geom.coordinates[1];
+    }
+    const fLat = parseFloat(lat);
+    const fLon = parseFloat(lon);
+    if (isNaN(fLat) || isNaN(fLon)) return null;
+    return { lat: fLat, lon: fLon };
   }, []);
 
   // Compute the [lng,lat] bounding extent of a point list (>= 2 valid points),
@@ -630,7 +730,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         coords.push([c.lon, c.lat]);
       }
     });
-    if (coords.length < 2) return null;
+    if (coords.length === 0) return null;
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     coords.forEach(([lng, lat]) => {
       if (lng < minLng) minLng = lng;
@@ -639,11 +739,158 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       if (lat > maxLat) maxLat = lat;
     });
     if (minLng === Infinity) return null;
+    // A single valid point can't produce a real bbox: pad it so fitBounds
+    // still eases the camera onto the point (maxZoom caps it near zoom 16)
+    // instead of skipping the zoom entirely.
+    if (coords.length === 1) {
+      const pad = 0.0012;
+      return {
+        bounds: [[minLng - pad, minLat - pad], [minLng + pad, minLat + pad]],
+        key: `1_${minLng.toFixed(5)}_${minLat.toFixed(5)}`
+      };
+    }
     return {
       bounds: [[minLng, minLat], [maxLng, maxLat]],
       key: `${coords.length}_${minLng.toFixed(5)}_${minLat.toFixed(5)}_${maxLng.toFixed(5)}_${maxLat.toFixed(5)}`
     };
   }, [getCoords]);
+
+  // Animate the camera onto the pano bounding extent with a flyTo swoop
+  // (zoom-out, glide, zoom-in); falls back to a plain fitBounds when the
+  // camera-fitting math degenerates.
+  const flyToDataExtent = useCallback((map, extent, duration = 1800, curve = 1.42) => {
+    if (!map || !extent || !extent.bounds) return;
+    try {
+      // Compute the target camera WITHOUT relying on maplibre's
+      // cameraForBounds: with a 0-sized/pre-style canvas it degenerates and
+      // can clamp the target zoom to the CURRENT zoom (no visible flight —
+      // stage 2 "fitted" while the camera never moved). Same fit semantics:
+      // padding 80 on each side, capped at maxZoom 16.
+      const pad = 80;
+      let vw = 0, vh = 0;
+      try {
+        const c = map.getContainer();
+        vw = c ? c.offsetWidth : 0;
+        vh = c ? c.offsetHeight : 0;
+      } catch (err) { /* ignore */ }
+      if (vw <= 0) { console.log('[flyToExt] container width 0 — using fallback viewport'); vw = 1280; }
+      if (vh <= 0) { console.log('[flyToExt] container height 0 — using fallback viewport'); vh = 720; }
+      const mercY = (lat) => (1 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2)) / Math.PI) / 2;
+      const [southWest, northEast] = extent.bounds;
+      const dLng = Math.max(1e-6, northEast[0] - southWest[0]);
+      const dY = Math.max(1e-9, mercY(northEast[1]) - mercY(southWest[1]));
+      const zWidth = Math.log2((vw - 2 * pad) / 512 / (dLng / 360));
+      const zHeight = Math.log2((vh - 2 * pad) / 512 / dY);
+      const targetZoom = Math.min(16, Math.max(2, Math.min(zWidth, zHeight)));
+      const center = [(southWest[0] + northEast[0]) / 2, (southWest[1] + northEast[1]) / 2];
+      console.log('[flyToExt] computing target', { targetZoom, center: { lng: Number(center[0].toFixed(5)), lat: Number(center[1].toFixed(5)) }, viewport: [vw, vh] });
+      try { if (map.getContainer() && map.getContainer().offsetWidth === 0) map.resize(); } catch (err) { /* ignore */ }
+      try { map.stop(); } catch (err) { /* ignore */ }
+      map.flyTo({
+        center,
+        zoom: targetZoom,
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+        duration,
+        curve,
+        essential: true
+      });
+      setTimeout(() => {
+        try {
+          const cc = map.getCenter();
+          console.log('[flyToExt] camera after flight', { zoom: map.getZoom(), lng: Number(cc.lng.toFixed(5)), lat: Number(cc.lat.toFixed(5)) });
+        } catch (err) { /* ignore */ }
+      }, duration + 300);
+      return;
+    } catch (err) { /* fall through to fitBounds */ }
+    try {
+      map.fitBounds(extent.bounds, { padding: 80, maxZoom: 16, duration, essential: true });
+    } catch (err) { /* ignore */ }
+  }, []);
+
+  // First-load/refresh choreography: stage 1 shows the project boundary extent
+  // (when one exists), then ~2s later stage 2 replaces it with the breathable
+  // zoom onto the panotrack extent. Scheduling stage 2 explicit-on-time also
+  // makes it the guaranteed LAST camera writer — fixes the focused-tab race
+  // where later/late-animating easies could beat the fit (background tabs
+  // squeezed animations to completion instantly, which is why it "worked"
+  // only from background refreshes).
+  const runIntroChoreo = useCallback((map, panoExtent) => {
+    if (!map || !panoExtent || !panoExtent.bounds) return;
+    // Stage 2 is always scheduled: a ~2s beat, then the breathable zoom onto
+    // the panotrack extent. Any user camera input (wheel/drag/click) cancels
+    // the scheduled flight so manual scrolling is never overridden.
+    const scheduleStage2 = () => {
+      const cancelStage2 = () => {
+        if (introChoreoTimerRef.current) {
+          clearTimeout(introChoreoTimerRef.current);
+          introChoreoTimerRef.current = null;
+          console.log('[3D intro] stage 2 cancelled — user took camera control');
+        }
+        try { map.stop(); } catch (err) { /* ignore */ }
+        try {
+          map.off('wheel', cancelStage2);
+          map.off('dragstart', cancelStage2);
+          map.off('mousedown', cancelStage2);
+        } catch (err) { /* ignore */ }
+      };
+      map.on('wheel', cancelStage2);
+      map.on('dragstart', cancelStage2);
+      map.on('mousedown', cancelStage2);
+      introChoreoTimerRef.current = setTimeout(() => {
+        introChoreoTimerRef.current = null;
+        try {
+          map.off('wheel', cancelStage2);
+          map.off('dragstart', cancelStage2);
+          map.off('mousedown', cancelStage2);
+        } catch (err) { /* ignore */ }
+        try {
+          console.log('[3D intro] stage 2: fitting panotrack extent');
+          // Breathable, relaxed dive: slow long-haul duration with a near-linear
+          // zoom curve (low `curve` value) so it glides in instead of swooping.
+          flyToDataExtent(map, panoExtent, 2400, 1.12);
+        } catch (err) { /* ignore */ }
+      }, 2200);
+    };
+    const allRings = [];
+    (boundaryGeojson?.features || []).forEach((f) => {
+      collectOuterRings(f.geometry).forEach((r) => allRings.push(r));
+    });
+    const flat = allRings.flat().filter((c) => Array.isArray(c) && c.length >= 2);
+    if (flat.length > 0) {
+      const lngs = flat.map((c) => c[0]);
+      const lats = flat.map((c) => c[1]);
+      const boundaryBounds = [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]];
+      console.log('[3D intro] stage 1: showing project boundary extent');
+      try {
+        const cam = map.cameraForBounds(boundaryBounds, { padding: 60, maxZoom: 12 });
+        if (cam && cam.center) {
+          map.flyTo({ center: cam.center, zoom: cam.zoom, bearing: map.getBearing(), pitch: map.getPitch(), duration: 1600, curve: 1.18, essential: true });
+        } else {
+          map.fitBounds(boundaryBounds, { padding: 60, maxZoom: 12, duration: 1600, essential: true });
+        }
+      } catch (err) {
+        try { map.fitBounds(boundaryBounds, { padding: 60, maxZoom: 12, duration: 1600, essential: true }); } catch (err2) { /* ignore */ }
+      }
+      scheduleStage2();
+    } else {
+      // No project boundary (e.g. standalone WebGIS): stage 1 pulls out to a
+      // wide overview of the survey area so there is a visible zoom beat,
+      // then stage 2 dives onto the panotrack extent.
+      console.log('[3D intro] stage 1: wide overview beat (no boundary), then panotrack zoom');
+      try {
+        const cam = map.cameraForBounds(panoExtent.bounds, { padding: 200, maxZoom: 9 });
+        if (cam && cam.center) {
+          map.flyTo({ center: cam.center, zoom: cam.zoom, bearing: map.getBearing(), pitch: map.getPitch(), duration: 1400, curve: 1.18, essential: true });
+        } else {
+          map.fitBounds(panoExtent.bounds, { padding: 200, maxZoom: 9, duration: 1400, essential: true });
+        }
+      } catch (err) {
+        try { map.fitBounds(panoExtent.bounds, { padding: 200, maxZoom: 9, duration: 1400, essential: true }); } catch (err2) { /* ignore */ }
+      }
+      scheduleStage2();
+    }
+  }, [boundaryGeojson, flyToDataExtent]);
 
   const getGeoJSON = useCallback((ptsList) => {
     const features = (ptsList || []).map((p, idx) => {
@@ -820,36 +1067,59 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         // Prefer fitting the full data extent so the whole mapped area is
         // visible on load; fall back to focusing the selected point / center.
         if (extent && extent.key !== lastDataFitKeyRef.current) {
+          console.log('[3D intro] idle: fitting pano extent', extent.key);
           lastDataFitKeyRef.current = extent.key;
-          map.fitBounds(
-            extent.bounds,
-            {
-              padding: 80,
-              maxZoom: 16,
-              duration: 1200,
-              easing: (t) => t * (2 - t),
-              essential: true
+          isIntroAnimatingRef.current = false;
+          if (!introChoreoDoneRef.current) {
+            introChoreoDoneRef.current = true;
+            if (!is3DMode) {
+              runIntroChoreo(map, extent);
+            } else {
+              console.log('[3D intro] idle: 3D mode — direct fit (no intro)');
+              flyToDataExtent(map, extent, 1000);
             }
-          );
-        } else if (!extent) {
+          } else {
+            flyToDataExtent(map, extent, 900);
+          }
+        } else if (!extent && isIntroAnimatingRef.current) {
+          console.log('[3D intro] idle: no points yet — easing to center (points not arrived)');
           map.easeTo({
             center: targetCenter,
             pitch: is3DMode ? 55 : 0,
             bearing: is3DMode ? -20 : 0,
             zoom: Math.max(zoom, 15),
-            duration: 1200,
+            duration: 1000,
             easing: (t) => t * (2 - t),
             essential: true
           });
         } else {
+          console.log('[3D intro] idle: extent already fitted — pitch/bearing only');
           map.setPitch(is3DMode ? 55 : 0);
           map.setBearing(is3DMode ? -20 : 0);
         }
 
-        // Release the lock after animation finishes
+        // Release the lock after the initial frame settling and ensure
+        // the camera lands on the full pano extent if points are ready.
         setTimeout(() => {
           isIntroAnimatingRef.current = false;
-        }, 1300);
+          const settleExtent = computeDataExtent(pointsRef.current);
+          if (settleExtent && settleExtent.key !== lastDataFitKeyRef.current) {
+            lastDataFitKeyRef.current = settleExtent.key;
+          if (!introChoreoDoneRef.current) {
+            introChoreoDoneRef.current = true;
+            if (!is3DMode) {
+              console.log('[3D intro] settle: points arrived mid-intro — run choreography');
+              runIntroChoreo(map, settleExtent);
+            } else {
+              console.log('[3D intro] settle: 3D mode — direct fit (no intro)');
+              flyToDataExtent(map, settleExtent, 1000);
+            }
+          } else {
+            console.log('[3D intro] settle: quick fit after choreography');
+            flyToDataExtent(map, settleExtent, 900);
+          }
+          }
+        }, 800);
       });
     });
 
@@ -966,26 +1236,41 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     const extent = computeDataExtent(points);
     if (!extent) return;
     if (extent.key === lastDataFitKeyRef.current) return;
-    // Let the intro animation own the camera on first load; don't fight a
-    // deliberate boundary focus either.
-    if (isIntroAnimatingRef.current || boundaryFocus) return;
 
+    // Immediately clear intro animation lock so this fit is never dropped
+    isIntroAnimatingRef.current = false;
     lastDataFitKeyRef.current = extent.key;
+    console.log('[3D data-fit] zooming to pano extent', { key: extent.key, points: Array.isArray(points) ? points.length : 0 });
 
     const doFit = () => {
       try {
-        map.fitBounds(extent.bounds, {
-          padding: 80,
-          maxZoom: 16,
-          duration: 1000,
-          easing: (t) => t * (2 - t),
-          essential: false
-        });
+        if (!introChoreoDoneRef.current) {
+          introChoreoDoneRef.current = true;
+          if (!pitch3D) {
+            console.log('[3D data-fit] first fit — intro choreography (boundary, then panotrack)');
+            runIntroChoreo(map, extent);
+          } else {
+            // 3D (pitched) view: no intro choreography — plain fit only.
+            console.log('[3D data-fit] first fit in 3D mode — direct fit (no intro)');
+            flyToDataExtent(map, extent, 1000);
+          }
+        } else {
+          console.log('[3D data-fit] subsequent update — quick fit');
+          flyToDataExtent(map, extent, 900);
+        }
       } catch (err) { /* ignore */ }
     };
     if (map.isStyleLoaded()) doFit();
-    else map.once('load', doFit);
-  }, [points, computeDataExtent, boundaryFocus]);
+    else {
+      // Camera transforms are style-independent in MapLibre — fit immediately
+      // instead of waiting for the style's "load" event. Deferring here used
+      // to stall the zoom forever when "load" was delayed by misbehaving tile
+      // providers, and let the intro's center-ease win the race in focused
+      // tabs (background tabs squeezed the pending fit into the last spot).
+      console.log('[3D data-fit] style not ready — fitting immediately (camera op is style-independent)');
+      doFit();
+    }
+  }, [points, computeDataExtent, stagedDataVersion, pitch3D, runIntroChoreo, flyToDataExtent]);
 
   // Project Geographic Boundary overlay (adaptive stroke + outside-dim mask)
   useEffect(() => {
@@ -998,6 +1283,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         const hoverColor = isDarkBasemap ? '#38bdf8' : '#1e40af';
 
         const hasBoundary = Boolean(boundaryGeojson && Array.isArray(boundaryGeojson.features) && boundaryGeojson.features.length > 0);
+        console.log('[boundary:applyBoundary]', { hasBoundary, features: hasBoundary ? boundaryGeojson.features.length : 0, dim: boundaryDimActive, styleLoaded: map.isStyleLoaded() });
         const emptyFC = { type: 'FeatureCollection', features: [] };
         const src = 'project-boundary';
         const dimSrc = 'project-boundary-dim-src';
@@ -1138,6 +1424,11 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     const map = mapRef.current;
     if (!map || !boundaryFocus) return;
 
+    // If survey points are present, prioritize fitting the survey trajectory
+    // rather than zooming out to the entire regional district boundary.
+    const hasPanoPoints = computeDataExtent(pointsRef.current) !== null;
+    if (hasPanoPoints) return;
+
     const doFit = () => {
       try {
         const allRings = [];
@@ -1150,7 +1441,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
           const lats = flat.map((c) => c[1]);
           map.fitBounds(
             [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
-            { padding: 60, maxZoom: 10, animate: true }
+            { padding: 60, maxZoom: 10, animate: true, duration: 1200, essential: true }
           );
         }
       } catch (err) { /* ignore */ }
@@ -1161,7 +1452,7 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
     } else {
       map.once('load', doFit);
     }
-  }, [boundaryGeojson, boundaryFocus]);
+  }, [boundaryGeojson, boundaryFocus, computeDataExtent]);
 
   //Reactive Basemap Tile Update
   useEffect(() => {
@@ -1270,6 +1561,16 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
       const startZoom = map.getZoom();
       const targetPitch = pitch3D ? 62 : 0;
       const targetBearing = pitch3D ? -15 : 0;
+      // Flat 2D mount / already-flat camera: the per-frame jumpTo loop below
+      // would override every other camera flight mid-animation (it stomped
+      // the intro's stage-2 swoop, leaving the camera parked at stage 1's
+      // zoom). A no-op animation must be skipped entirely.
+      if (!pitch3D && startPitch === 0 && startBearing === 0) {
+        try { if (map.getSource && map.getSource('terrain-dem')) map.setTerrain(null); } catch (err) { /* ignore */ }
+        const c0 = map.getCenter();
+        if (onMapMoved) onMapMoved([c0.lat, c0.lng], map.getZoom());
+        return;
+      }
       const duration = 1800;
       const baseline = startZoom + Math.log2(clampCos(startPitch));
 
@@ -1408,8 +1709,8 @@ const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], sele
         center: targetLngLat,
         pitch: pitch3D ? 60 : 0,
         bearing: pitch3D ? -20 : 0,
-        duration: 350,
-        essential: false
+        duration: 600,
+        essential: true
       });
     }
   }, [selectedPoint, viewState?.yaw, pitch3D, getCoords, noSonar]);
@@ -1503,7 +1804,16 @@ const MapComponent = ({
 
   const [stagedItemsMap, setStagedItemsMap] = useState({});
   const [stagedOverlayPoints, setStagedOverlayPoints] = useState([]);
+  // Bumped on every SET_STAGED_DATA / STAGED_DATA_PREVIEW arrival; consumed by
+  // the 3D view's data-extent fit effect so the fit-to-pano-extent re-fires on
+  // each staged arrival regardless of the `points` array identity (Dashboard
+  // refresh/reload race).
+  const [stagedDataVersion, setStagedDataVersion] = useState(0);
   const [isStagingPreviewMap, setIsStagingPreviewMap] = useState(false);
+  // True while the 2D intro choreography is mid-sequence; FOCUS_BOUNDARY
+  // direct fits are ignored during that window so the intro always lands on
+  // the panotrack extent (as on standalone WebGIS).
+  const introLockRef = useRef(false);
   const [overrideBasemap, setOverrideBasemap] = useState(null);
   const [overrideOpacity, setOverrideOpacity] = useState(1.0);
   const [customTileUrl, setCustomTileUrl] = useState(null);
@@ -1731,9 +2041,17 @@ const MapComponent = ({
           });
           setStagedItemsMap(sMap);
           setStagedOverlayPoints(extraPoints);
+          // Path 1 guarantee: every staged-data arrival (SET_STAGED_DATA /
+          // SET_STIMULUS / STAGED_DATA_PREVIEW) bumps this counter. The 3D
+          // view's data-extent fit effect consumes it in its deps, so the
+          // fit to the pano bounding box re-fires on each arrival regardless
+          // of the `points` array identity — exactly the Dashboard refresh /
+          // reload race that used to leave the camera unpinned.
+          setStagedDataVersion((v) => v + 1);
         }
       } else if (e.data?.type === 'SET_PROJECT_BOUNDARY') {
         const g = normalizeBoundaryGeojson(e.data.geojson);
+        console.log('[SET_PROJECT_BOUNDARY received]', g ? `${g.features.length} feature(s)` : 'normalized->null', { rawType: e.data?.geojson?.type, hasRaw: Boolean(e.data?.geojson) });
         setBoundaryGeojson(g);
         if (!g) {
           setBoundaryFocus(false);
@@ -1743,7 +2061,9 @@ const MapComponent = ({
         }
       } else if (e.data?.type === 'FOCUS_BOUNDARY') {
         setBoundaryFocus(true);
-        if (Array.isArray(e.data.bbox) && e.data.bbox.length === 4 && mapInstance) {
+        if (introLockRef.current) {
+          console.log('[FOCUS_BOUNDARY] deferred — intro choreography in flight');
+        } else if (Array.isArray(e.data.bbox) && e.data.bbox.length === 4 && mapInstance) {
           try {
             mapInstance.fitBounds(
               [
@@ -2061,6 +2381,7 @@ const MapComponent = ({
             isEmbed={isEmbed}
             setMapInstance={setMapInstance}
             setCurrentZoom={setCurrentZoom}
+            introLockRef={introLockRef}
             onMapMoved={(c, z) => {
               setMapCenter([c.lat, c.lng]);
               setCurrentZoom(z);
@@ -2178,6 +2499,7 @@ const MapComponent = ({
           boundaryDimActive={boundaryDimActive}
           boundaryFocus={boundaryFocus}
           noSonar={isNoSonar}
+          stagedDataVersion={stagedDataVersion}
           viewState={viewState}
           onPointSelect={onPointSelect}
           onMapMoved={(c, z) => {
