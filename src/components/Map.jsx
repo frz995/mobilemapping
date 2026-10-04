@@ -21,6 +21,28 @@ if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
 const INITIAL_CENTER = [2.54866, 102.815835];
 const INITIAL_ZOOM = 16;
 
+// --- Camera choreography presets ---
+// NAVIGATION = a deliberate move chosen by the operator (clicking a row in the
+// dashboard / admin data table). It gets a long, near-linear glide: the camera
+// eases out, drifts, then settles in — a "breathable" zoom instead of a fast
+// swoop. A low `curve` keeps it a glide rather than an arc, so the zoom-in/out
+// reads as one calm movement. MapLibre durations are milliseconds, Leaflet
+// durations are seconds, hence the two unit families below.
+const NAV_FLIGHT_MS = 3000;
+const NAV_FLIGHT_CURVE = 1.06;
+const NAV_BOUNDS_FLIGHT_SEC = 3.0;
+const NAV_PAN_SEC = 1.4;
+// The dashboard sends SET_MAP_VIEW_STATE and the new data set as separate
+// postMessages, so the request lands a tick or two before the extent it should
+// frame. Keep the request "pending" for this long so the flight waits for that
+// extent instead of expiring — and so a later data refresh can't inherit an
+// ancient request and crawl.
+const NAV_FLIGHT_WINDOW_MS = 8000;
+// SETTLE = data streaming / extent nudges where the framing barely changes;
+// keep these short so live updates don't crawl.
+const SETTLE_FLIGHT_MS = 900;
+const SETTLE_FLIGHT_CURVE = 1.42;
+
 // Collect [lng, lat] outer rings from a GeoJSON geometry. Handles both
 // Polygon and MultiPolygon shapes (states / whole country are MultiPolygon).
 const collectOuterRings = (geom) => {
@@ -181,12 +203,25 @@ const MapController = ({
   isViewerOpen,
   viewState,
   isEmbed,
+  isDeletionMode = false,
   setMapInstance,
   setCurrentZoom,
   introLockRef = null,
+  navFlightToken = 0,
+  navFlightAt = 0,
   onMapMoved
 }) => {
   const map = useMap();
+  // Bumped by the parent whenever a dashboard / admin table row selection asks
+  // for a new view. The data-fit effect consumes it so operator-driven
+  // navigation flies slowly while streaming keeps the short settle. The
+  // request is only honoured inside a short window, so one whose extent never
+  // arrives expires instead of making a later data refresh crawl.
+  const lastNavTokenRef = useRef(navFlightToken);
+  const isNavFlightPending = () =>
+    navFlightToken !== lastNavTokenRef.current &&
+    performance.now() - navFlightAt < NAV_FLIGHT_WINDOW_MS;
+
 
   useEffect(() => {
     if (!map) return;
@@ -252,6 +287,11 @@ const MapController = ({
           if (ln > maxLng) maxLng = ln;
         });
         const boundsKey = `${latlngs.length}_${minLng.toFixed(4)}_${minLat.toFixed(4)}_${maxLng.toFixed(4)}_${maxLat.toFixed(4)}`;
+
+        // Checked (not consumed) before the bounds-change guard: the request
+        // often lands a tick before the extent it should frame, and an unchanged
+        // extent means the camera already sits where the operator asked.
+        const isNavFlight = isNavFlightPending();
 
         if (boundsKey !== lastBoundsKeyRef.current) {
           lastBoundsKeyRef.current = boundsKey;
@@ -322,6 +362,13 @@ const MapController = ({
                 map.flyToBounds(bounds, { padding: [200, 200], maxZoom: 9, duration: 1.2, easeLinearity: 0.2 });
                 schedule2DStage2();
               }
+            } else if (isNavFlight) {
+              // Operator-driven navigation (dashboard / admin data table row):
+              // long, near-linear glide with a soft deceleration tail so the
+              // zoom in/out reads as one calm movement.
+              lastNavTokenRef.current = navFlightToken;
+              console.log('[2D nav] fitting extent — breathable glide', { maxZoom });
+              map.flyToBounds(bounds, { padding: [60, 60], maxZoom, duration: NAV_BOUNDS_FLIGHT_SEC, easeLinearity: 0.08 });
             } else {
               map.fitBounds(bounds, { padding: [60, 60], maxZoom });
             }
@@ -329,7 +376,7 @@ const MapController = ({
         }
       }
     }
-  }, [filteredPoints, map]);
+  }, [filteredPoints, map, navFlightToken]);
 
   // Explicit user trigger for "Zoom to Track"
   useEffect(() => {
@@ -345,7 +392,9 @@ const MapController = ({
       if (latlngs.length > 0) {
         const bounds = L.latLngBounds(latlngs);
         if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+          // Deliberate operator action — same breathable glide as table-row
+          // navigation instead of Leaflet's 0.25s default fit.
+          map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 17, duration: NAV_BOUNDS_FLIGHT_SEC, easeLinearity: 0.08 });
         }
       }
     }
@@ -413,7 +462,6 @@ const MapController = ({
       const lt = parseFloat(p.lat ?? p.latitude ?? p.y);
       return !isNaN(ln) && !isNaN(lt) && !(ln === 0 && lt === 0);
     });
-    console.log('[boundary:2D] fit-gate', { pano: hasPanoPoints, autoFit: Boolean(boundaryFocus || isEmbed || isDeletionMode), introPending: Boolean(introStage2TimerRef.current) });
     if ((boundaryFocus || isEmbed || isDeletionMode) && !hasPanoPoints && !introStage2TimerRef.current) {
       const bounds = rings.reduce((acc, ring) => {
         ring.forEach((pt) => acc.extend(pt));
@@ -437,6 +485,10 @@ const MapController = ({
   }, [map, boundaryGeojson, boundaryDimActive, boundaryFocus, activeBasemap, isEmbed, isDeletionMode]);
 
   const lastSelectedCoordsRef = useRef('');
+  // Tracks the navigation token consumed by the point-pan effect. Kept separate
+  // from the data-fit token so the two effects don't steal the flag from
+  // each other when both run in the same commit.
+  const lastPanNavTokenRef = useRef(navFlightToken);
   useEffect(() => {
     if (selectedPoint && map) {
       const lat = parseFloat(selectedPoint.lat ?? selectedPoint.latitude ?? selectedPoint.y);
@@ -445,16 +497,23 @@ const MapController = ({
         const coordsKey = `${lat.toFixed(5)}_${lon.toFixed(5)}`;
         if (coordsKey !== lastSelectedCoordsRef.current) {
           lastSelectedCoordsRef.current = coordsKey;
-          map.panTo([lat, lon], { animate: true, duration: 0.3 });
+          // A pending navigation flight owns the camera — a hard 0.3s pan onto
+          // the first panorama would cut the glide short and read as a jerk.
+          const navFlightPending = navFlightToken !== lastPanNavTokenRef.current;
+          lastPanNavTokenRef.current = navFlightToken;
+          if (!navFlightPending) {
+            map.panTo([lat, lon], { animate: true, duration: NAV_PAN_SEC });
+          }
         }
       }
     }
-  }, [selectedPoint, map]);
+  }, [selectedPoint, map, navFlightToken]);
 
   useEffect(() => {
     const handleFlyTo = (e) => {
       if (map && e.detail && typeof e.detail.lat === 'number' && typeof e.detail.lon === 'number') {
-        map.flyTo([e.detail.lat, e.detail.lon], 16);
+        // Operator-driven jump to a place: glide in instead of snapping.
+        map.flyTo([e.detail.lat, e.detail.lon], 16, { duration: 1.6, easeLinearity: 0.15 });
       }
     };
     window.addEventListener('map-fly-to', handleFlyTo);
@@ -670,7 +729,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
 };
 
 // --- WebGL 3D Terrain Viewport (MapLibre Engine) ---
-  const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved, pitch3D = 0, boundaryGeojson = null, boundaryDimActive = false, boundaryFocus = false, noSonar = false, stagedDataVersion = 0 }) => {
+  const WebGL3DView = ({ center, zoom, basemap, overrideOpacity, points = [], selectedPoint, viewState, onPointSelect, onMapMoved, pitch3D = 0, boundaryGeojson = null, boundaryDimActive = false, boundaryFocus = false, noSonar = false, stagedDataVersion = 0, navFlightToken = 0, navFlightAt = 0, isEmbed = false }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const sonarMarkerRef = useRef(null);
@@ -678,6 +737,21 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
   const pointsRef = useRef(points);
   const isIntroAnimatingRef = useRef(true);
   const lastDataFitKeyRef = useRef('');
+  // Last navigation token already turned into a camera flight. A dashboard /
+  // admin table row click bumps the token, which makes the data fit use the
+  // slow "breathable" glide instead of the short streaming settle.
+  const lastNavTokenRef = useRef(navFlightToken);
+  // Read through a ref so the mount-only intro effect below (which runs long
+  // after the render that registered its `idle` listener) still sees the latest
+  // request instead of a stale one captured at mount.
+  const navFlightTokenRef = useRef(navFlightToken);
+  const navFlightAtRef = useRef(navFlightAt);
+  navFlightTokenRef.current = navFlightToken;
+  navFlightAtRef.current = navFlightAt;
+  const isNavFlightPending = () =>
+    navFlightTokenRef.current !== lastNavTokenRef.current &&
+    performance.now() - navFlightAtRef.current < NAV_FLIGHT_WINDOW_MS;
+  const consumeNavFlight = () => { lastNavTokenRef.current = navFlightTokenRef.current; };
   // Set true the first time the load/refresh intro choreography (boundary
   // extent first, then the panotrack extent zoom) runs; subsequent dataset
   // updates use a plain quick fit instead.
@@ -910,11 +984,13 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
     return { type: 'FeatureCollection', features };
   }, [getCoords]);
 
-  // Format MapLibre Tile URLs (expands {s} to standard a,b,c subdomains)
-  const getFormattedTileUrls = useCallback((url) => {
+  // Format MapLibre Tile URLs (expands {s} using the basemap's own subdomains,
+  // falling back to a,b,c so Google (mt0-mt3) and Carto do not collide).
+  const getFormattedTileUrls = useCallback((url, subdomains) => {
     if (!url) return ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'];
     if (url.includes('{s}')) {
-      return ['a', 'b', 'c'].map(s => url.replace('{s}', s));
+      const subs = (Array.isArray(subdomains) && subdomains.length) ? subdomains : ['a', 'b', 'c'];
+      return subs.map(s => url.replace('{s}', s));
     }
     return [url];
   }, []);
@@ -922,7 +998,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const initialTileUrls = getFormattedTileUrls(basemap?.url);
+    const initialTileUrls = getFormattedTileUrls(basemap?.url, basemap?.subdomains);
 
     // 1. Initialize matching 2D top-down flat perspective
     const isVectorBasemap = basemap?.isVector || basemap?.url?.includes('styles/');
@@ -958,6 +1034,11 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
     });
 
     mapRef.current = map;
+
+    // Surface tile/style failures instead of silently rendering a blank canvas.
+    map.on('error', (e) => {
+      console.warn('[map:error]', e?.error?.message || e?.error || e);
+    });
 
     map.on('load', () => {
       map.resize();
@@ -1076,10 +1157,16 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
               runIntroChoreo(map, extent);
             } else {
               console.log('[3D intro] idle: 3D mode — direct fit (no intro)');
-              flyToDataExtent(map, extent, 1000);
+              flyToDataExtent(map, extent, SETTLE_FLIGHT_MS, SETTLE_FLIGHT_CURVE);
             }
+          } else if (isNavFlightPending()) {
+            // A table row was clicked while the map was still settling: honour
+            // the deliberate, breathable glide rather than a quick snap.
+            consumeNavFlight();
+            console.log('[3D intro] idle: nav flight pending — breathable glide', extent.key);
+            flyToDataExtent(map, extent, NAV_FLIGHT_MS, NAV_FLIGHT_CURVE);
           } else {
-            flyToDataExtent(map, extent, 900);
+            flyToDataExtent(map, extent, SETTLE_FLIGHT_MS, SETTLE_FLIGHT_CURVE);
           }
         } else if (!extent && isIntroAnimatingRef.current) {
           console.log('[3D intro] idle: no points yet — easing to center (points not arrived)');
@@ -1112,11 +1199,15 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
               runIntroChoreo(map, settleExtent);
             } else {
               console.log('[3D intro] settle: 3D mode — direct fit (no intro)');
-              flyToDataExtent(map, settleExtent, 1000);
+              flyToDataExtent(map, settleExtent, SETTLE_FLIGHT_MS, SETTLE_FLIGHT_CURVE);
             }
+          } else if (isNavFlightPending()) {
+            consumeNavFlight();
+            console.log('[3D intro] settle: nav flight pending — breathable glide', settleExtent.key);
+            flyToDataExtent(map, settleExtent, NAV_FLIGHT_MS, NAV_FLIGHT_CURVE);
           } else {
             console.log('[3D intro] settle: quick fit after choreography');
-            flyToDataExtent(map, settleExtent, 900);
+            flyToDataExtent(map, settleExtent, SETTLE_FLIGHT_MS, SETTLE_FLIGHT_CURVE);
           }
           }
         }, 800);
@@ -1194,6 +1285,27 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
     map.on('resize', postBounds);
     postBounds();
 
+    // Cursor coordinates for the embedded dashboard readout. The Leaflet
+    // renderer emits this from useMapEvents, but vector basemaps (and every 3D
+    // view) run through MapLibre, so the badge stayed blank there. Throttled to
+    // ~20 Hz and only while embedded.
+    let lastCoordsPost = 0;
+    const postCoords = (e) => {
+      if (!isEmbed) return;
+      const now = performance.now();
+      if (now - lastCoordsPost < 50) return;
+      const ll = map.unproject(e.point);
+      if (!ll) return;
+      lastCoordsPost = now;
+      window.parent.postMessage({
+        type: 'MAP_COORDS',
+        lat: ll.lat,
+        lon: ll.lng,
+        lng: ll.lng
+      }, '*');
+    };
+    map.on('mousemove', postCoords);
+
     // Keep the canvas sized correctly when the container resizes (e.g. the
     // 360 viewer split panel in the full app), so the dim/line overlay stays.
     let resizeObserver = null;
@@ -1210,20 +1322,35 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
       map.off('moveend', postBounds);
       map.off('zoomend', postBounds);
       map.off('resize', postBounds);
+      map.off('mousemove', postCoords);
       if (resizeObserver) resizeObserver.disconnect();
       map.remove();
     };
   }, []);
 
-  // Update GeoJSON source when points change
+  // Update GeoJSON source when points change.
+  // The style is not loaded on first paint and is re-created on every basemap
+  // change, so bail out only if the source is genuinely absent and wait for the
+  // next style load instead of dropping the update on the floor.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
 
-    const source = map.getSource('pts-3d');
-    if (source) {
-      source.setData(getGeoJSON(points));
+    const apply = () => {
+      const source = map.getSource('pts-3d');
+      if (source) source.setData(getGeoJSON(points));
+    };
+
+    if (map.isStyleLoaded()) {
+      apply();
+      return;
     }
+    map.once('styledata', apply);
+    map.once('load', apply);
+    return () => {
+      map.off('styledata', apply);
+      map.off('load', apply);
+    };
   }, [points, getGeoJSON]);
 
   // Dynamically fit the camera to the full extent of loaded data so the whole
@@ -1235,6 +1362,10 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
 
     const extent = computeDataExtent(points);
     if (!extent) return;
+    // Checked (not consumed) before the early return: the request often lands a
+    // tick before the extent it should frame, and an unchanged extent means the
+    // camera already sits where the operator asked.
+    const isNavFlight = isNavFlightPending();
     if (extent.key === lastDataFitKeyRef.current) return;
 
     // Immediately clear intro animation lock so this fit is never dropped
@@ -1252,11 +1383,17 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
           } else {
             // 3D (pitched) view: no intro choreography — plain fit only.
             console.log('[3D data-fit] first fit in 3D mode — direct fit (no intro)');
-            flyToDataExtent(map, extent, 1000);
+            flyToDataExtent(map, extent, SETTLE_FLIGHT_MS, SETTLE_FLIGHT_CURVE);
           }
+        } else if (isNavFlight) {
+          // Operator-driven navigation (dashboard / admin data table row): the
+          // long, near-linear glide — breathe out, drift, then settle in.
+          consumeNavFlight();
+          console.log('[3D nav] fitting extent — breathable glide', { key: extent.key });
+          flyToDataExtent(map, extent, NAV_FLIGHT_MS, NAV_FLIGHT_CURVE);
         } else {
           console.log('[3D data-fit] subsequent update — quick fit');
-          flyToDataExtent(map, extent, 900);
+          flyToDataExtent(map, extent, SETTLE_FLIGHT_MS, SETTLE_FLIGHT_CURVE);
         }
       } catch (err) { /* ignore */ }
     };
@@ -1270,7 +1407,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
       console.log('[3D data-fit] style not ready — fitting immediately (camera op is style-independent)');
       doFit();
     }
-  }, [points, computeDataExtent, stagedDataVersion, pitch3D, runIntroChoreo, flyToDataExtent]);
+  }, [points, computeDataExtent, stagedDataVersion, pitch3D, runIntroChoreo, flyToDataExtent, navFlightToken]);
 
   // Project Geographic Boundary overlay (adaptive stroke + outside-dim mask)
   useEffect(() => {
@@ -1467,7 +1604,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
       const existingRasterSource = map.getSource('raster-tiles');
       if (isVectorStyle && !existingRasterSource) return;
 
-      const newTiles = getFormattedTileUrls(basemap?.url);
+      const newTiles = getFormattedTileUrls(basemap?.url, basemap?.subdomains);
       const opacity = typeof overrideOpacity === 'number' ? overrideOpacity : 1.0;
 
       // If source exists, safely swap tiles or recreate if schema differs
@@ -1635,6 +1772,15 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
   // Synchronize 3D Sonar directly to Selected Point Coordinates
   const lastCenterCoordRef = useRef('');
 
+  // Latest panorama yaw, kept in a ref so the sonar sync does not have to
+  // depend on it. viewState.yaw updates ~60x per second while the viewer
+  // spins; keeping it in the dependency list rebuilt update3DSonar (and this
+  // whole effect, including the boundary re-apply) on every single frame.
+  const yawRef = useRef(viewState?.yaw);
+  yawRef.current = viewState?.yaw;
+  // Kicks the self-parking yaw rAF loop once a cone element exists.
+  const startYawLoopRef = useRef(null);
+
   const update3DSonar = useCallback(() => {
     const map = mapRef.current;
     if (noSonar) {
@@ -1642,6 +1788,8 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
         sonarMarkerRef.current.remove();
         sonarMarkerRef.current = null;
       }
+      // Clearing the cone lets the self-parking yaw loop stop on its next tick.
+      sonarConeRef.current = null;
       return;
     }
     if (!map || !selectedPoint) {
@@ -1649,6 +1797,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
         sonarMarkerRef.current.remove();
         sonarMarkerRef.current = null;
       }
+      sonarConeRef.current = null;
       return;
     }
 
@@ -1692,18 +1841,27 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
         .addTo(map);
 
       sonarConeRef.current = el.querySelector('.cone-rotator-wrapper');
+      if (startYawLoopRef.current) startYawLoopRef.current();
     } else {
       sonarMarkerRef.current.setLngLat(targetLngLat);
     }
 
-    if (sonarConeRef.current && viewState?.yaw !== undefined) {
-      sonarConeRef.current.style.transform = `rotate(${viewState.yaw}deg)`;
+    if (sonarConeRef.current && yawRef.current !== undefined) {
+      sonarConeRef.current.style.transform = `rotate(${yawRef.current}deg)`;
     }
 
     // Only pan camera if the initial dive has finished and point changed.
     // Center on the selected point, but only pitch/bear in 3D mode — in 2D
     // the map must stay flat.
-    if (!isIntroAnimatingRef.current && lastCenterCoordRef.current !== coordKey) {
+    // flightActiveRef is the single camera-owner token: the 2D/3D flight drives
+    // pitch/bearing with a per-frame jumpTo loop, so an easeTo issued while it
+    // is mid-air gets stomped mid-animation and leaves the camera parked
+    // part-way through the swoop ("stuck 3D toggle"). Defer instead: the
+    // coordKey is left unwritten so the next sync pass retries once the flight
+    // has landed.
+    if (!isIntroAnimatingRef.current
+      && !flightActiveRef.current
+      && lastCenterCoordRef.current !== coordKey) {
       lastCenterCoordRef.current = coordKey;
       map.easeTo({
         center: targetLngLat,
@@ -1713,20 +1871,22 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
         essential: true
       });
     }
-  }, [selectedPoint, viewState?.yaw, pitch3D, getCoords, noSonar]);
+  }, [selectedPoint, pitch3D, getCoords, noSonar]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Runs on every camera-yaw batch (60fps). Deliberately lightweight and
-    // non-stacking: earlier this re-ran map.resize() and registered stacked
-    // once('load'/'idle') listeners on every re-render, so idle callbacks kept
-    // firing resize+repaint forever — which visibly glitched wheel zooming.
-    // Real container resizes are already handled by the ResizeObserver below
-    // the init effect, and the boundary overlay re-applies itself.
+    // Runs when the selected point or view mode changes. Deliberately
+    // lightweight and non-stacking: earlier this re-ran map.resize() and
+    // registered stacked once('load'/'idle') listeners on every re-render, so
+    // idle callbacks kept firing resize+repaint forever — which visibly
+    // glitched wheel zooming. Real container resizes are already handled by the
+    // ResizeObserver in the init effect, and the boundary overlay re-applies
+    // itself.
     let loadCb = null;
     let disposed = false;
+    let yawRaf = null;
 
     const runSync = () => {
       if (disposed) return;
@@ -1734,6 +1894,24 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
       try {
         if (applyBoundaryRef.current) applyBoundaryRef.current();
       } catch (err) { /* ignore */ }
+    };
+
+    // The sonar cone must keep tracking the viewer yaw at frame rate even
+    // though update3DSonar no longer depends on it. Write the DOM transform
+    // directly so the camera sync is not rebuilt 60 times per second. The loop
+    // parks itself when there is no cone to rotate (no point selected, or
+    // sonar disabled) and is kicked by update3DSonar when one is created.
+    const tickYaw = () => {
+      yawRaf = null;
+      if (disposed) return;
+      const cone = sonarConeRef.current;
+      if (!cone || yawRef.current === undefined) return;
+      cone.style.transform = `rotate(${yawRef.current}deg)`;
+      yawRaf = requestAnimationFrame(tickYaw);
+    };
+    if (yawRaf == null && sonarConeRef.current) yawRaf = requestAnimationFrame(tickYaw);
+    startYawLoopRef.current = () => {
+      if (yawRaf == null && !disposed && sonarConeRef.current) yawRaf = requestAnimationFrame(tickYaw);
     };
 
     if (map.isStyleLoaded()) {
@@ -1745,6 +1923,7 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
 
     return () => {
       disposed = true;
+      if (yawRaf != null) cancelAnimationFrame(yawRaf);
       if (loadCb) map.off('load', loadCb);
     };
   }, [update3DSonar]);
@@ -1809,6 +1988,18 @@ const MapComponent = ({
   // each staged arrival regardless of the `points` array identity (Dashboard
   // refresh/reload race).
   const [stagedDataVersion, setStagedDataVersion] = useState(0);
+  // Bumped whenever the operator deliberately asks for a new view (a dashboard
+  // or admin data-table row selection). Both the 2D and 3D map views read this
+  // to fly the slow, breathable camera glide for that fit, while live staging
+  // updates keep the short settle. `at` stamps the request so a flight whose
+  // data never arrives expires.
+  const [navFlight, setNavFlight] = useState({ token: 0, at: 0 });
+  const requestNavFlight = useCallback(
+    // Stamped with the same clock the views read (performance.now) so the
+    // request window is meaningful.
+    () => setNavFlight((s) => ({ token: s.token + 1, at: performance.now() })),
+    []
+  );
   const [isStagingPreviewMap, setIsStagingPreviewMap] = useState(false);
   // True while the 2D intro choreography is mid-sequence; FOCUS_BOUNDARY
   // direct fits are ignored during that window so the intro always lands on
@@ -1862,6 +2053,11 @@ const MapComponent = ({
           setIsSingleDailyRun(false);
           setActiveRunId(null);
         }
+        // Anything other than the "show everything" view is an operator-driven
+        // jump between subgrids / daily runs — fly the slow glide onto it.
+        if ((viewMode && viewMode !== 'ALL') || msgRunId) {
+          requestNavFlight();
+        }
       } else if (e.data?.type === 'SET_THEME') {
         const theme = e.data.theme || 'dark';
         document.documentElement.setAttribute('data-theme', theme);
@@ -1875,14 +2071,20 @@ const MapComponent = ({
             bm === 'osm_standard' ? 'osm' :
               bm === 'carto_dark' ? 'dark' :
                 bm === 'carto_light' ? 'positron' :
-                  bm === 'google_hybrid' ? 'google-hybrid' : bm;
+                  bm === 'positron' ? 'positron' :
+                    bm === 'voyager' ? 'voyager' :
+                      bm === 'custom' ? 'custom_tile' :
+                        bm === 'custom_tile' ? 'custom_tile' :
+                          bm === 'google_hybrid' ? 'google-hybrid' : bm;
           setOverrideBasemap(mapId);
         }
         if (typeof e.data.opacity === 'number') {
           setOverrideOpacity(e.data.opacity);
         }
-        if (e.data.customUrl) {
-          setCustomTileUrl(e.data.customUrl);
+        // Presence check (not truthiness) so an empty string clears a stale
+        // custom URL when the dashboard switches back to a normal basemap.
+        if ('customUrl' in e.data) {
+          setCustomTileUrl(e.data.customUrl || '');
         }
       } else if (e.data?.type === 'SET_MAP_THEME') {
         if (e.data.settings) {
@@ -1955,6 +2157,12 @@ const MapComponent = ({
         setIsSingleDailyRun(isSingle);
         if (e.data.runId !== undefined) {
           setActiveRunId(e.data.runId || null);
+        }
+        // A focused staged selection (single run, or an explicit run id) is an
+        // operator-driven jump too — same slow glide. Plain refreshes of the
+        // staging view keep the short settle.
+        if (isSingle || e.data.runId) {
+          requestNavFlight();
         }
 
         if (e.data.stagedItems && Array.isArray(e.data.stagedItems)) {
@@ -2070,7 +2278,7 @@ const MapComponent = ({
                 [e.data.bbox[1], e.data.bbox[0]],
                 [e.data.bbox[3], e.data.bbox[2]]
               ],
-              { padding: [25, 25], maxZoom: 14, animate: true, duration: 0.5 }
+              { padding: [25, 25], maxZoom: 14, animate: true, duration: 1.8 }
             );
           } catch (err) { /* ignore */ }
         }
@@ -2088,7 +2296,7 @@ const MapComponent = ({
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [mapInstance]);
+  }, [mapInstance, requestNavFlight]);
 
   useEffect(() => {
     const map = mapInstance;
@@ -2124,7 +2332,16 @@ const MapComponent = ({
 
   const basemap = useMemo(() => {
     const targetId = overrideBasemap || activeBasemap || 'ofm-positron';
-    return BASEMAPS.find(b => b.id === targetId) || BASEMAPS[0];
+    const found = BASEMAPS.find(b => b.id === targetId);
+    if (found) return found;
+    // Unknown id: say so explicitly instead of silently swapping the basemap.
+    console.warn(`[basemap] unknown id "${targetId}" — falling back to "${BASEMAPS[0].id}"`);
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'BASEMAP_ERROR', requested: targetId, resolved: BASEMAPS[0].id }, '*');
+      }
+    } catch (err) { }
+    return BASEMAPS[0];
   }, [overrideBasemap, activeBasemap]);
 
   // A basemap picked from the sidebar is explicit user intent and wins over
@@ -2159,16 +2376,6 @@ const MapComponent = ({
     if (currentZoom >= 14) return 1;
     return 0.75;
   }, [currentZoom]);
-
-  const handleManualSelectTool = useCallback((toolId) => {
-    if (setActiveTool) {
-      setActiveTool(prev => (prev === toolId ? null : toolId));
-    }
-  }, [setActiveTool]);
-
-  const handleCloseCoordinatePopup = useCallback(() => {
-    setSelectedPoint(null);
-  }, []);
 
   useEffect(() => {
     if (activeTool && activeTool !== 'distance' && activeTool !== 'area') {
@@ -2294,20 +2501,73 @@ const MapComponent = ({
     });
   }, [mapViewState, filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun, isSingleRun, runId, activeRunId]);
 
+  // Single source of truth for how a point is classified as defect / stitching /
+  // published. Both renderers (Leaflet circle markers and the MapLibre
+  // pts-3d-layer) must agree, otherwise the status checkboxes in the dashboard
+  // filter one renderer but not the other.
+  const resolvePointStatus = useCallback((p) => {
+    const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
+    const dynamicDefect = dynamicDefectMap[fnKey];
+    const rawSub = p.subgrid || (p.filename ? p.filename.split('-')[0] : '');
+    const normSub = rawSub.toUpperCase().trim();
+
+    // In QAQC Workbench mode, only trust dynamicDefectMap (dashboard-controlled); ignore Supabase is_defect
+    const isDefect = isQaqcWorkbenchMode
+      ? (dynamicDefect !== undefined ? Boolean(dynamicDefect) : false)
+      : (
+        dynamicDefect !== undefined
+          ? Boolean(dynamicDefect)
+          : Boolean(p.is_defect) || Boolean(p.isDefect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
+      );
+
+    const stagedEntry = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
+    const isPointPub = stagedItemsMap[fnKey]
+      ? Boolean(stagedItemsMap[fnKey].isPublished)
+      : Boolean(p.isPublished || p.published || p.publishToWebGIS === 'yes' || p.status === 'yes' || (!p.isStagingPreview && !p.isStaged && p.status !== 'in process' && p.status !== 'stitching' && p.publishToWebGIS !== 'in process'));
+
+    const isStagedPoint = !isPointPub && Boolean(
+      p.isStagingPreview ||
+      p.isStaged ||
+      p.status === 'in process' ||
+      p.status === 'stitching' ||
+      p.publishToWebGIS === 'in process' ||
+      p.publishToWebGIS === 'need to recheck' ||
+      p.publishToWebGIS === 'no' ||
+      (stagedEntry && !stagedEntry.isPublished)
+    );
+
+    return {
+      fnKey,
+      isDefect,
+      isStitching: !isDefect && isStagedPoint,
+      isPublished: !isDefect && isPointPub
+    };
+  }, [dynamicDefectMap, stagedItemsMap, isQaqcWorkbenchMode]);
+
   const compiled3DPoints = useMemo(() => {
-    return effectivePointsList.map(p => {
-      const fnKey = (p.filename || p.image_url || p.point_id || p.pointId || '').replace(/^.*[\\\/]/, '').toUpperCase();
-      const dynamicDefect = dynamicDefectMap[fnKey];
-      // In QAQC Workbench mode, only trust dynamicDefectMap (dashboard-controlled); ignore Supabase is_defect
-      const isDefect = isQaqcWorkbenchMode
-        ? (dynamicDefect !== undefined ? Boolean(dynamicDefect) : false)
-        : (dynamicDefect !== undefined ? Boolean(dynamicDefect) : Boolean(p.is_defect));
-      return {
+    // Master layer toggle. The dashboard's "Show Panotrack Layer" switch and the
+    // per-status checkboxes used to be applied to the Leaflet renderer only, so
+    // on the default vector basemap (MapLibre) the toggle did nothing at all.
+    if (!isPanotrackVisible || !showPanotrackData) return [];
+
+    return effectivePointsList.reduce((acc, p) => {
+      const { isDefect, isStitching, isPublished } = resolvePointStatus(p);
+
+      if (isDefect && !statusFilters.defect) return acc;
+      if (isPublished && !statusFilters.published) return acc;
+      if (isStitching && !statusFilters.stitching) return acc;
+
+      acc.push({
         ...p,
-        color: isDefect ? '#ef4444' : (p.color || (p.status === 'in process' ? '#f59e0b' : '#22c55e'))
-      };
-    });
-  }, [effectivePointsList, dynamicDefectMap, isQaqcWorkbenchMode]);
+        color: isDefect
+          ? (customLayerColors?.defectTrackColor || '#ef4444')
+          : isStitching
+            ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+            : (customLayerColors?.publishedTrackColor || '#10b981')
+      });
+      return acc;
+    }, []);
+  }, [effectivePointsList, resolvePointStatus, statusFilters, showPanotrackData, isPanotrackVisible, customLayerColors]);
 
   return (
     <div className="relative w-full h-full bg-[#f8fafc]">
@@ -2379,9 +2639,12 @@ const MapComponent = ({
             isViewerOpen={isViewerOpen}
             viewState={viewState}
             isEmbed={isEmbed}
+            isDeletionMode={isDeletionMode}
             setMapInstance={setMapInstance}
             setCurrentZoom={setCurrentZoom}
             introLockRef={introLockRef}
+            navFlightToken={navFlight.token}
+            navFlightAt={navFlight.at}
             onMapMoved={(c, z) => {
               setMapCenter([c.lat, c.lng]);
               setCurrentZoom(z);
@@ -2400,38 +2663,7 @@ const MapComponent = ({
               }
             }
 
-            const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
-            const dynamicDefect = dynamicDefectMap[fnKey];
-            const rawSub = p.subgrid || (p.filename ? p.filename.split('-')[0] : '');
-            const normSub = rawSub.toUpperCase().trim();
-            const stagedInfo = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
-
-            const isDefect = isQaqcWorkbenchMode
-              ? (dynamicDefect !== undefined ? Boolean(dynamicDefect) : false)
-              : (
-                dynamicDefect !== undefined
-                  ? Boolean(dynamicDefect)
-                  : Boolean(p.is_defect) || Boolean(p.isDefect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
-              );
-
-            // Determine if the point is published based on specific stagedInfo or direct properties
-            const isPointPub = stagedItemsMap[fnKey]
-              ? Boolean(stagedItemsMap[fnKey].isPublished)
-              : Boolean(p.isPublished || p.published || p.publishToWebGIS === 'yes' || p.status === 'yes' || (!p.isStagingPreview && !p.isStaged && p.status !== 'in process' && p.status !== 'stitching' && p.publishToWebGIS !== 'in process'));
-
-            const isStagedPoint = !isPointPub && Boolean(
-              p.isStagingPreview ||
-              p.isStaged ||
-              p.status === 'in process' ||
-              p.status === 'stitching' ||
-              p.publishToWebGIS === 'in process' ||
-              p.publishToWebGIS === 'need to recheck' ||
-              p.publishToWebGIS === 'no' ||
-              (stagedItemsMap[fnKey] && !stagedItemsMap[fnKey].isPublished)
-            );
-
-            const isStitching = !isDefect && isStagedPoint;
-            const isPublished = !isDefect && isPointPub;
+            const { isDefect, isStitching, isPublished } = resolvePointStatus(p);
 
             if (isDefect && !statusFilters.defect) return null;
             if (isPublished && !statusFilters.published) return null;
@@ -2500,7 +2732,10 @@ const MapComponent = ({
           boundaryFocus={boundaryFocus}
           noSonar={isNoSonar}
           stagedDataVersion={stagedDataVersion}
+          navFlightToken={navFlight.token}
+          navFlightAt={navFlight.at}
           viewState={viewState}
+          isEmbed={isEmbed}
           onPointSelect={onPointSelect}
           onMapMoved={(c, z) => {
             setMapCenter(c);
@@ -2536,7 +2771,15 @@ const SearchBar = ({ map, isDark }) => {
       const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
       const data = await response.json();
       if (data?.[0]) {
-        map.flyTo([parseFloat(data[0].lat), parseFloat(data[0].lon)], 16);
+        // Deliberate operator move — glide in rather than snap. MapLibre takes
+        // milliseconds, Leaflet takes seconds, and this search box is shared by
+        // both engines.
+        const isMapLibre = typeof map.getCanvas === 'function';
+        map.flyTo(
+          [parseFloat(data[0].lat), parseFloat(data[0].lon)],
+          16,
+          isMapLibre ? { duration: 1600, curve: 1.2, essential: true } : { duration: 1.6, easeLinearity: 0.15 }
+        );
       }
     } catch (err) { console.error(err); }
   };

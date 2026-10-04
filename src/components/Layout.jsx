@@ -262,6 +262,12 @@ const Layout = ({ isEmbed = false }) => {
         if (cameraFrameRef.current == null) {
           cameraFrameRef.current = requestAnimationFrame(flushCameraFrame);
         }
+      } else if (event.data.type === 'MAP_POINT_DESELECTED') {
+        // Dashboard "Return to Map": drop the selection so the sonar cone and any
+        // 360 pane stop following a frame the operator has just dismissed. Left
+        // unhandled, the cone lingered on the dashboard map.
+        setSelectedPoint(null);
+        setViewState(prev => (prev.yaw === 0 ? prev : { ...prev, yaw: 0 }));
       } else if (event.data.type === 'MAP_POINT_SELECTED') {
         const pt = event.data.point || event.data.payload || event.data;
         if (pt) {

@@ -252,5 +252,34 @@ export const BASEMAPS = [
     subdomains: ['a', 'b', 'c'],
     attribution: '<a href="https://github.com/cyclosm/cyclosm-cartocss-style/releases">CyclOSM</a> | &copy; OpenStreetMap contributors',
     preview: 'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/12/3205/2012.png'
+  },
+  {
+    id: 'positron',
+    name: 'Positron (Carto/OFM)',
+    category: 'Aesthetic Minimal',
+    url: 'https://tiles.openfreemap.org/styles/positron',
+    isVector: true,
+    attribution: '&copy; <a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    preview: 'https://tiles.openfreemap.org/styles/positron/preview.png'
+  },
+  {
+    id: 'voyager',
+    name: 'Voyager (Carto)',
+    category: 'Street',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    maxZoom: 20,
+    subdomains: ['a', 'b', 'c'],
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+    preview: 'https://a.basemaps.cartocdn.com/rastertiles/voyager/12/3205/2012.png'
+  },
+  {
+    id: 'custom_tile',
+    name: 'Custom Tile',
+    category: 'Custom',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    maxZoom: 21,
+    subdomains: ['a', 'b', 'c'],
+    attribution: '',
+    preview: ''
   }
 ];
