@@ -12,6 +12,25 @@ import { useTheme } from '../context/ThemeContext';
 import { BASEMAPS } from '../config/basemaps';
 import clsx from 'clsx';
 
+/**
+ * Trajectory status toggles, all on by default.
+ *
+ * Declared at module scope so the initial state and the FILTER_STATUS_TYPES
+ * merge cannot drift — that drift was a live bug: the handler used to replace
+ * the object wholesale, so a key the sender omitted became `undefined` and
+ * every point of that status disappeared instead of defaulting visible.
+ *
+ * `missingFrames` exists only on the EMBEDDED path. Standalone there is no
+ * sender, `frameState` cannot be derived (no Storage inventory is fetched), and
+ * the toggle simply has nothing to hide.
+ */
+const DEFAULT_STATUS_FILTERS = {
+  published: true,
+  defect: true,
+  stitching: true,
+  missingFrames: true
+};
+
 // Set worker before initializing map
 if (typeof window !== 'undefined' && maplibregl.setWorkerUrl) {
   maplibregl.setWorkerUrl(workerUrl);
@@ -1975,7 +1994,7 @@ const MapComponent = ({
   const isNoSonar = new URLSearchParams(window.location.search).has('noSonar') || isDeletionMode;
 
   const [showPanotrackData, setShowPanotrackData] = useState(true);
-  const [statusFilters, setStatusFilters] = useState({ published: true, defect: true, stitching: true });
+  const [statusFilters, setStatusFilters] = useState({ ...DEFAULT_STATUS_FILTERS });
   const isQaqcWorkbenchMode = new URLSearchParams(window.location.search).has('qaqcWorkbench');
   const [dynamicDefectMap, setDynamicDefectMap] = useState({});
   const [isBboxActive, setIsBboxActive] = useState(false);
@@ -2091,7 +2110,14 @@ const MapComponent = ({
           setCustomLayerColors(e.data.settings);
         }
       } else if (e.data?.type === 'FILTER_STATUS_TYPES') {
-        if (e.data.statusFilters) setStatusFilters(e.data.statusFilters);
+        // Merged over the current state, NOT replaced. Replacing made any key
+        // the sender omitted become `undefined`, which is falsy — so a sender
+        // predating a status silently hid every point of that status instead of
+        // defaulting it on. A dashboard that has not yet learned `missingFrames`
+        // should leave the missing frames visible, not erase them.
+        if (e.data.statusFilters) {
+          setStatusFilters((prev) => ({ ...DEFAULT_STATUS_FILTERS, ...prev, ...e.data.statusFilters }));
+        }
         if (typeof e.data.showPanotrackData === 'boolean') setShowPanotrackData(e.data.showPanotrackData);
       } else if (e.data?.type === 'FILTER_SUBGRID' || e.data?.type === 'SET_SUBGRID_FILTER') {
         if (e.data.isSingleRun !== undefined) {
@@ -2194,7 +2220,9 @@ const MapComponent = ({
                 status: isItemPub ? 'yes' : (item.status || 'in process'),
                 isPublished: isItemPub,
                 opacity: typeof item.opacity === 'number' ? item.opacity : (isItemPub ? 1.0 : 0.5),
-                statusColor: item.statusColor || (isItemPub ? '#10b981' : '#f59e0b')
+                statusColor: item.statusColor || (isItemPub ? '#10b981' : '#f59e0b'),
+                frameState: item.frameState,
+                qaState: item.qaState
               };
             }
             const pans = item.panoramas || item.points || [];
@@ -2216,7 +2244,13 @@ const MapComponent = ({
                   sMap[fn] = {
                     status: p.status === 'selected' ? 'selected' : (isPanDefect ? 'defect' : isPanPub ? 'yes' : 'in process'),
                     isPublished: isPanPub,
-                    color: p.color || (isPanDefect ? '#ef4444' : isPanPub ? '#10b981' : '#f59e0b')
+                    color: p.color || (isPanDefect ? '#ef4444' : isPanPub ? '#10b981' : '#f59e0b'),
+                    // Carried so `resolvePointStatus` can tell a missing frame
+                    // apart from a present one. It cannot be derived here: the
+                    // frame state comes from a Storage-bucket inventory this app
+                    // never fetches, which is why the sender publishes it.
+                    frameState: p.frameState,
+                    qaState: p.qaState
                   };
                   if (isPanDefect) {
                     setDynamicDefectMap(prev => ({ ...prev, [fn]: true }));
@@ -2240,6 +2274,11 @@ const MapComponent = ({
                     published: isPanPub,
                     isDefect: isPanDefect,
                     is_defect: isPanDefect,
+                    // This literal is an allow-list, so any field the sender
+                    // adds is silently dropped. `frameState`/`qaState` would have
+                    // died here, which is why the filter could never see them.
+                    frameState: p.frameState,
+                    qaState: p.qaState,
                     opacity: p.opacity ?? (isPanDefect ? 1.0 : (isPanPub ? 1.0 : 0.7)),
                     color: p.color || (isPanDefect ? '#ef4444' : (isPanPub ? '#10b981' : '#f59e0b'))
                   });
@@ -2501,10 +2540,24 @@ const MapComponent = ({
     });
   }, [mapViewState, filteredPoints, points, stagedOverlayPoints, filterSubgrid, isSingleDailyRun, isSingleRun, runId, activeRunId]);
 
-  // Single source of truth for how a point is classified as defect / stitching /
-  // published. Both renderers (Leaflet circle markers and the MapLibre
-  // pts-3d-layer) must agree, otherwise the status checkboxes in the dashboard
-  // filter one renderer but not the other.
+  // Single source of truth for how a point is classified as defect / missing /
+  // stitching / published. Both renderers (Leaflet circle markers and the
+  // MapLibre pts-3d-layer) must agree, otherwise the status checkboxes in the
+  // dashboard filter one renderer but not the other.
+  //
+  // PRECEDENCE — read this before adding a fifth status:
+  //     defect  >  missing  >  stitching  >  published
+  //
+  // `missing` outranks `stitching`/`published` because a POI with no image behind
+  // it is not a published point at all, and colouring it green asserts a
+  // healthy frame that does not exist. `defect` still outranks `missing`, so a
+  // frame that is BOTH defective and absent stays red; the panel carries the
+  // full picture.
+  //
+  // `missing` is CONFIRMED absence only. `unverified` (storage unreachable) and
+  // `unrecorded` (no filename was ever stored) deliberately fall through to the
+  // normal buckets: rendering a connectivity failure as a pile of missing frames
+  // is the same failure as migrations 0032/0033, one layer down.
   const resolvePointStatus = useCallback((p) => {
     const fnKey = (p.filename || p.image_url || '').replace(/^.*[\\\/]/, '').toUpperCase();
     const dynamicDefect = dynamicDefectMap[fnKey];
@@ -2520,10 +2573,16 @@ const MapComponent = ({
           : Boolean(p.is_defect) || Boolean(p.isDefect) || (Number(p.defect_count) > 0) || (Number(p.defects) > 0) || (typeof p.qa_status === 'string' && (p.qa_status.toLowerCase().includes('flag') || p.qa_status.toLowerCase().includes('defect'))) || (p.defect_flags && typeof p.defect_flags === 'object' && Object.values(p.defect_flags).some(Boolean))
       );
 
+    // Read from the staged overlay first, because that is where the field
+    // survives the SET_STAGED_DATA literal; fall back to the point itself for
+    // the SET_MAP_VIEW_STATE path, which passes points through verbatim.
+    const frameSource = stagedItemsMap[fnKey] || p;
+    const isMissing = frameSource.frameState === 'missing' || p.frameState === 'missing';
+
     const stagedEntry = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
     const isPointPub = stagedItemsMap[fnKey]
       ? Boolean(stagedItemsMap[fnKey].isPublished)
-      : Boolean(p.isPublished || p.published || p.publishToWebGIS === 'yes' || p.status === 'yes' || (!p.isStagingPreview && !p.isStaged && p.status !== 'in process' && p.status !== 'stitching' && p.publishToWebGIS !== 'in process'));
+      : Boolean(p.isPublished || p.published || p.publishToWebGIS === 'yes' || p.status === 'yes' || (!p.isStagingPreview && !p.isStaged && p.status !== 'in process' && p.status !== 'stitching' && p.status !== 'missing' && p.publishToWebGIS !== 'in process'));
 
     const isStagedPoint = !isPointPub && Boolean(
       p.isStagingPreview ||
@@ -2539,8 +2598,9 @@ const MapComponent = ({
     return {
       fnKey,
       isDefect,
-      isStitching: !isDefect && isStagedPoint,
-      isPublished: !isDefect && isPointPub
+      isMissing: !isDefect && isMissing,
+      isStitching: !isDefect && !isMissing && isStagedPoint,
+      isPublished: !isDefect && !isMissing && isPointPub
     };
   }, [dynamicDefectMap, stagedItemsMap, isQaqcWorkbenchMode]);
 
@@ -2551,19 +2611,30 @@ const MapComponent = ({
     if (!isPanotrackVisible || !showPanotrackData) return [];
 
     return effectivePointsList.reduce((acc, p) => {
-      const { isDefect, isStitching, isPublished } = resolvePointStatus(p);
+      const { isDefect, isMissing, isStitching, isPublished } = resolvePointStatus(p);
 
       if (isDefect && !statusFilters.defect) return acc;
+      if (isMissing && !statusFilters.missingFrames) return acc;
       if (isPublished && !statusFilters.published) return acc;
       if (isStitching && !statusFilters.stitching) return acc;
 
       acc.push({
         ...p,
-        color: isDefect
-          ? (customLayerColors?.defectTrackColor || '#ef4444')
-          : isStitching
-            ? (customLayerColors?.stagingTrackColor || '#f59e0b')
-            : (customLayerColors?.publishedTrackColor || '#10b981')
+        // The sender owns the colour. `panotrackAppearance.ts` in the
+        // dashboard is the single authority and is unit-tested; re-deriving it
+        // here is what silently discarded every missing-frame gray, because this
+        // ternary had no notion of a missing frame and overwrote the value.
+        // The fallback remains for standalone mode, where no sender exists and
+        // `frameState` cannot be derived (no Storage inventory is fetched).
+        color: p.color
+          ? p.color
+          : isDefect
+            ? (customLayerColors?.defectTrackColor || '#ef4444')
+            : isMissing
+              ? '#94a3b8'
+              : isStitching
+                ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+                : (customLayerColors?.publishedTrackColor || '#10b981')
       });
       return acc;
     }, []);
@@ -2663,17 +2734,24 @@ const MapComponent = ({
               }
             }
 
-            const { isDefect, isStitching, isPublished } = resolvePointStatus(p);
+            const { isDefect, isMissing, isStitching, isPublished } = resolvePointStatus(p);
 
             if (isDefect && !statusFilters.defect) return null;
+            if (isMissing && !statusFilters.missingFrames) return null;
             if (isPublished && !statusFilters.published) return null;
             if (isStitching && !statusFilters.stitching) return null;
 
-            const color = isDefect
-              ? (customLayerColors?.defectTrackColor || '#ef4444')
-              : isStitching
-                ? (customLayerColors?.stagingTrackColor || '#f59e0b')
-                : (customLayerColors?.publishedTrackColor || '#10b981');
+            // Sender owns the colour — see the note in compiled3DPoints. The
+            // fallback chain is for standalone mode, which has no sender.
+            const color = p.color
+              ? p.color
+              : isDefect
+                ? (customLayerColors?.defectTrackColor || '#ef4444')
+                : isMissing
+                  ? '#94a3b8'
+                  : isStitching
+                    ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+                    : (customLayerColors?.publishedTrackColor || '#10b981');
 
             const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
               ? customLayerColors.opacity
