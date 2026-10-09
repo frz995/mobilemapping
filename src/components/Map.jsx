@@ -1411,8 +1411,8 @@ const BBoxDrawLayer = ({ isActive, onBoundsChange }) => {
           console.log('[3D nav] fitting extent — breathable glide', { key: extent.key });
           flyToDataExtent(map, extent, NAV_FLIGHT_MS, NAV_FLIGHT_CURVE);
         } else {
-          console.log('[3D data-fit] subsequent update — quick fit');
-          flyToDataExtent(map, extent, SETTLE_FLIGHT_MS, SETTLE_FLIGHT_CURVE);
+          // Preserve operator camera position and zoom on subsequent filter/status updates
+          console.log('[3D data-fit] filter/status update — preserving camera zoom');
         }
       } catch (err) { /* ignore */ }
     };
@@ -2072,9 +2072,17 @@ const MapComponent = ({
           setIsSingleDailyRun(false);
           setActiveRunId(null);
         }
-        // Anything other than the "show everything" view is an operator-driven
-        // jump between subgrids / daily runs — fly the slow glide onto it.
-        if ((viewMode && viewMode !== 'ALL') || msgRunId) {
+        // Only trigger an animated nav flight when the operator actually selected
+        // a different subgrid, daily run, or view mode — NOT on passive filter toggles.
+        const nextSubgrid = (subgrid || '').toUpperCase().trim();
+        const nextRunId = msgRunId || null;
+        const nextViewMode = viewMode || 'ALL';
+        const isNavigationTargetChanged =
+          nextSubgrid !== (mapViewState.subgrid || '').toUpperCase().trim() ||
+          nextRunId !== (mapViewState.runId || null) ||
+          nextViewMode !== (mapViewState.viewMode || 'ALL');
+
+        if (isNavigationTargetChanged && ((nextViewMode !== 'ALL') || nextRunId)) {
           requestNavFlight();
         }
       } else if (e.data?.type === 'SET_THEME') {
@@ -2577,7 +2585,8 @@ const MapComponent = ({
     // survives the SET_STAGED_DATA literal; fall back to the point itself for
     // the SET_MAP_VIEW_STATE path, which passes points through verbatim.
     const frameSource = stagedItemsMap[fnKey] || p;
-    const isMissing = frameSource.frameState === 'missing' || p.frameState === 'missing';
+    const hasNoImage = frameSource.frameState === 'missing' || p.frameState === 'missing' || p.status === 'missing';
+    const isMissing = !isDefect && hasNoImage && Boolean(statusFilters.missingFrames);
 
     const stagedEntry = stagedItemsMap[fnKey] || stagedItemsMap[normSub];
     const isPointPub = stagedItemsMap[fnKey]
@@ -2598,11 +2607,12 @@ const MapComponent = ({
     return {
       fnKey,
       isDefect,
-      isMissing: !isDefect && isMissing,
+      hasNoImage,
+      isMissing,
       isStitching: !isDefect && !isMissing && isStagedPoint,
       isPublished: !isDefect && !isMissing && isPointPub
     };
-  }, [dynamicDefectMap, stagedItemsMap, isQaqcWorkbenchMode]);
+  }, [dynamicDefectMap, stagedItemsMap, isQaqcWorkbenchMode, statusFilters.missingFrames]);
 
   const compiled3DPoints = useMemo(() => {
     // Master layer toggle. The dashboard's "Show Panotrack Layer" switch and the
@@ -2611,30 +2621,33 @@ const MapComponent = ({
     if (!isPanotrackVisible || !showPanotrackData) return [];
 
     return effectivePointsList.reduce((acc, p) => {
-      const { isDefect, isMissing, isStitching, isPublished } = resolvePointStatus(p);
+      const { isDefect, hasNoImage, isMissing, isStitching, isPublished } = resolvePointStatus(p);
 
       if (isDefect && !statusFilters.defect) return acc;
       if (isMissing && !statusFilters.missingFrames) return acc;
       if (isPublished && !statusFilters.published) return acc;
       if (isStitching && !statusFilters.stitching) return acc;
 
+      // When statusFilters.missingFrames is false and point has no image,
+      // override any baked gray so it displays as yellow (staging) or green (published).
+      let finalColor;
+      if (isDefect) {
+        finalColor = customLayerColors?.defectTrackColor || '#ef4444';
+      } else if (isMissing) {
+        finalColor = '#94a3b8';
+      } else if (hasNoImage && !statusFilters.missingFrames) {
+        finalColor = isStitching
+          ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+          : (customLayerColors?.publishedTrackColor || '#10b981');
+      } else {
+        finalColor = p.color || (isStitching
+          ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+          : (customLayerColors?.publishedTrackColor || '#10b981'));
+      }
+
       acc.push({
         ...p,
-        // The sender owns the colour. `panotrackAppearance.ts` in the
-        // dashboard is the single authority and is unit-tested; re-deriving it
-        // here is what silently discarded every missing-frame gray, because this
-        // ternary had no notion of a missing frame and overwrote the value.
-        // The fallback remains for standalone mode, where no sender exists and
-        // `frameState` cannot be derived (no Storage inventory is fetched).
-        color: p.color
-          ? p.color
-          : isDefect
-            ? (customLayerColors?.defectTrackColor || '#ef4444')
-            : isMissing
-              ? '#94a3b8'
-              : isStitching
-                ? (customLayerColors?.stagingTrackColor || '#f59e0b')
-                : (customLayerColors?.publishedTrackColor || '#10b981')
+        color: finalColor
       });
       return acc;
     }, []);
@@ -2734,24 +2747,29 @@ const MapComponent = ({
               }
             }
 
-            const { isDefect, isMissing, isStitching, isPublished } = resolvePointStatus(p);
+            const { isDefect, hasNoImage, isMissing, isStitching, isPublished } = resolvePointStatus(p);
 
             if (isDefect && !statusFilters.defect) return null;
             if (isMissing && !statusFilters.missingFrames) return null;
             if (isPublished && !statusFilters.published) return null;
             if (isStitching && !statusFilters.stitching) return null;
 
-            // Sender owns the colour — see the note in compiled3DPoints. The
-            // fallback chain is for standalone mode, which has no sender.
-            const color = p.color
-              ? p.color
-              : isDefect
-                ? (customLayerColors?.defectTrackColor || '#ef4444')
-                : isMissing
-                  ? '#94a3b8'
-                  : isStitching
-                    ? (customLayerColors?.stagingTrackColor || '#f59e0b')
-                    : (customLayerColors?.publishedTrackColor || '#10b981');
+            // When statusFilters.missingFrames is false and point has no image,
+            // override baked gray so it displays as yellow (staging) or green (published).
+            let color;
+            if (isDefect) {
+              color = customLayerColors?.defectTrackColor || '#ef4444';
+            } else if (isMissing) {
+              color = '#94a3b8';
+            } else if (hasNoImage && !statusFilters.missingFrames) {
+              color = isStitching
+                ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+                : (customLayerColors?.publishedTrackColor || '#10b981');
+            } else {
+              color = p.color || (isStitching
+                ? (customLayerColors?.stagingTrackColor || '#f59e0b')
+                : (customLayerColors?.publishedTrackColor || '#10b981'));
+            }
 
             const layerOpacityMultiplier = typeof customLayerColors?.opacity === 'number'
               ? customLayerColors.opacity
