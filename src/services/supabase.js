@@ -1,7 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
+﻿import { createClient } from '@supabase/supabase-js';
 
-const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const DEFAULT_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://tqqybumedywzylujjkqa.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Nf52vHR8rCpvoj-w77ZehQ_QniT4-EV';
 
 const MAX_SAFE_HEADER_LENGTH = 1500;
 
@@ -116,7 +116,7 @@ export function createSupabaseClient(url = DEFAULT_SUPABASE_URL, anonKey = DEFAU
   const supabaseUrl = url || DEFAULT_SUPABASE_URL;
   // Only fall back to the build-time anon key when the URL is also the build-time
   // target. A custom URL (e.g. local Supabase) with a cloud key would silently
-  // 401 on every query — better to use the caller's key verbatim.
+  // 401 on every query â€” better to use the caller's key verbatim.
   const supabaseAnonKey = anonKey || (supabaseUrl === DEFAULT_SUPABASE_URL ? DEFAULT_SUPABASE_ANON_KEY : '');
 
   return createClient(supabaseUrl, supabaseAnonKey, {
@@ -132,3 +132,4 @@ export function createSupabaseClient(url = DEFAULT_SUPABASE_URL, anonKey = DEFAU
 }
 
 export const supabase = createSupabaseClient();
+

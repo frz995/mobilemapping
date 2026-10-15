@@ -25,3 +25,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Binary tools and sync scratch
+*.exe
+rclone*
+**/rclone*

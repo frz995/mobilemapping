@@ -1,0 +1,7 @@
+﻿*.exe
+**/*.exe
+rclone*
+**/rclone*
+*.py
+**/*.py
+*.docx
