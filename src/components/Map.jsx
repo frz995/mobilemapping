@@ -2609,10 +2609,10 @@ const MapComponent = ({
       isDefect,
       hasNoImage,
       isMissing,
-      isStitching: !isDefect && !isMissing && isStagedPoint,
-      isPublished: !isDefect && !isMissing && isPointPub
+      isStitching: isStagedPoint,
+      isPublished: isPointPub
     };
-  }, [dynamicDefectMap, stagedItemsMap, isQaqcWorkbenchMode, statusFilters.missingFrames]);
+  }, [dynamicDefectMap, stagedItemsMap, isQaqcWorkbenchMode, statusFilters.missingFrames, statusFilters.defect]);
 
   const compiled3DPoints = useMemo(() => {
     // Master layer toggle. The dashboard's "Show Panotrack Layer" switch and the
@@ -2623,15 +2623,15 @@ const MapComponent = ({
     return effectivePointsList.reduce((acc, p) => {
       const { isDefect, hasNoImage, isMissing, isStitching, isPublished } = resolvePointStatus(p);
 
-      if (isDefect && !statusFilters.defect) return acc;
-      if (isMissing && !statusFilters.missingFrames) return acc;
       if (isPublished && !statusFilters.published) return acc;
       if (isStitching && !statusFilters.stitching) return acc;
+      if (!isPublished && !isStitching && isDefect && !statusFilters.defect) return acc;
+      if (isMissing && !statusFilters.missingFrames) return acc;
 
-      // When statusFilters.missingFrames is false and point has no image,
-      // override any baked gray so it displays as yellow (staging) or green (published).
+      // When statusFilters.defect is true, defect points render red.
+      // When statusFilters.defect is false, defect points fall back to staging or published color.
       let finalColor;
-      if (isDefect) {
+      if (isDefect && statusFilters.defect) {
         finalColor = customLayerColors?.defectTrackColor || '#ef4444';
       } else if (isMissing) {
         finalColor = '#94a3b8';
@@ -2749,15 +2749,15 @@ const MapComponent = ({
 
             const { isDefect, hasNoImage, isMissing, isStitching, isPublished } = resolvePointStatus(p);
 
-            if (isDefect && !statusFilters.defect) return null;
-            if (isMissing && !statusFilters.missingFrames) return null;
             if (isPublished && !statusFilters.published) return null;
             if (isStitching && !statusFilters.stitching) return null;
+            if (!isPublished && !isStitching && isDefect && !statusFilters.defect) return null;
+            if (isMissing && !statusFilters.missingFrames) return null;
 
-            // When statusFilters.missingFrames is false and point has no image,
-            // override baked gray so it displays as yellow (staging) or green (published).
+            // When statusFilters.defect is true, defect points render red.
+            // When statusFilters.defect is false, defect points fall back to staging or published color.
             let color;
-            if (isDefect) {
+            if (isDefect && statusFilters.defect) {
               color = customLayerColors?.defectTrackColor || '#ef4444';
             } else if (isMissing) {
               color = '#94a3b8';
@@ -2775,7 +2775,7 @@ const MapComponent = ({
               ? customLayerColors.opacity
               : (typeof customLayerColors?.layerOpacity === 'number' ? customLayerColors.layerOpacity : 1.0);
 
-            const baseOpacity = isDefect ? 1.0 : (isStitching ? 0.7 : 1.0);
+            const baseOpacity = (isDefect && statusFilters.defect) ? 1.0 : (isStitching ? 0.7 : 1.0);
             const pointOpacity = baseOpacity * layerOpacityMultiplier;
 
             return (
